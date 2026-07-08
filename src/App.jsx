@@ -1,0 +1,1142 @@
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+
+// --- INISIALISASI FIREBASE ---
+const firebaseConfig = {
+  apiKey: "AIzaSyAFCc-J03dzOYyl30_waMd25iF4-gVh7rk",
+  authDomain: "ccms-pro-by-pamungkas.firebaseapp.com",
+  projectId: "ccms-pro-by-pamungkas",
+  storageBucket: "ccms-pro-by-pamungkas.firebasestorage.app",
+  messagingSenderId: "69936221641",
+  appId: "1:69936221641:web:64a6aaa1f8dfc7a580ec18",
+  measurementId: "G-EEVR3N4EC3"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'cmms-pabrik-saya';
+
+export default function App() {
+  // --- STATES: SISTEM & UI ---
+  const [fbUser, setFbUser] = useState(null);
+  const [isDbLoaded, setIsDbLoaded] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [activeMenu, setActiveMenu] = useState('dashboard');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [dialog, setDialog] = useState(null);
+
+  // --- STATES: DATABASE ---
+  const [factories, setFactories] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [machines, setMachines] = useState([]);
+  const [dailyParams, setDailyParams] = useState([]);
+  const [dailyChecks, setDailyChecks] = useState([]);
+  const [breakdowns, setBreakdowns] = useState([]);
+  const [pmSchedules, setPmSchedules] = useState([]);
+  const [pmParams, setPmParams] = useState([]);
+  const [dailyActivities, setDailyActivities] = useState([]);
+
+  // --- EFFECT: LOAD FONTAWESOME & FIREBASE AUTH ---
+  useEffect(() => {
+    // Inject FontAwesome
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';
+    document.head.appendChild(link);
+
+    // Init Auth
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth error:", err);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setFbUser);
+    return () => unsubscribe();
+  }, []);
+
+  // --- EFFECT: SINKRONISASI DATABASE (REAL-TIME) ---
+  useEffect(() => {
+    if (!fbUser) return;
+
+    const getPath = (colName) => collection(db, 'artifacts', appId, 'public', 'data', colName);
+    const handleSnap = (setter) => (snap) => setter(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    const handleErr = (err) => console.error("DB Sync Error:", err);
+
+    const unsubFactories = onSnapshot(getPath('cmms_factories'), handleSnap(setFactories), handleErr);
+    const unsubUsers = onSnapshot(getPath('cmms_users'), (snap) => {
+      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setIsDbLoaded(true);
+    }, handleErr);
+    const unsubMachines = onSnapshot(getPath('cmms_machines'), handleSnap(setMachines), handleErr);
+    const unsubDailyParams = onSnapshot(getPath('cmms_dailyParams'), handleSnap(setDailyParams), handleErr);
+    const unsubDailyChecks = onSnapshot(getPath('cmms_dailyChecks'), handleSnap(setDailyChecks), handleErr);
+    const unsubBreakdowns = onSnapshot(getPath('cmms_breakdowns'), handleSnap(setBreakdowns), handleErr);
+    const unsubPmSchedules = onSnapshot(getPath('cmms_pmSchedules'), handleSnap(setPmSchedules), handleErr);
+    const unsubPmParams = onSnapshot(getPath('cmms_pmParams'), handleSnap(setPmParams), handleErr);
+    const unsubDailyActivities = onSnapshot(getPath('cmms_dailyActivities'), handleSnap(setDailyActivities), handleErr);
+
+    return () => {
+      unsubFactories(); unsubUsers(); unsubMachines(); unsubDailyParams();
+      unsubDailyChecks(); unsubBreakdowns(); unsubPmSchedules(); unsubPmParams(); unsubDailyActivities();
+    };
+  }, [fbUser]);
+
+  // --- HELPER FUNCTIONS ---
+  const showMessage = (title, message, type = 'info') => setDialog({ title, message, type, onConfirm: null });
+  const showConfirm = (title, message, onConfirm) => setDialog({ title, message, type: 'confirm', onConfirm });
+  const colRef = (colName) => collection(db, 'artifacts', appId, 'public', 'data', colName);
+  const docRef = (colName, id) => doc(db, 'artifacts', appId, 'public', 'data', colName, id);
+
+  const getAvailableMachines = () => {
+    if (currentUser?.role === 'admin' || currentUser?.factory === 'All') return machines;
+    return machines.filter(m => m.factory === currentUser?.factory);
+  };
+
+  const seedDatabase = async () => {
+    try {
+      await addDoc(colRef('cmms_factories'), { name: 'Pabrik A' });
+      await addDoc(colRef('cmms_factories'), { name: 'Pabrik B' });
+      await addDoc(colRef('cmms_users'), { username: 'admin', password: '123', role: 'admin', name: 'Budi (Supervisor)', factory: 'All' });
+      await addDoc(colRef('cmms_users'), { username: 'tek_a', password: '123', role: 'teknisi', name: 'Andi (Teknisi A)', factory: 'Pabrik A' });
+      await addDoc(colRef('cmms_users'), { username: 'prod_a', password: '123', role: 'user', name: 'Siti (Produksi A)', factory: 'Pabrik A' });
+      showMessage('Berhasil', 'Database awal berhasil dibuat! Silakan login dengan akun: admin / 123', 'success');
+    } catch (e) {
+      showMessage('Error', 'Gagal membuat database awal.', 'error');
+    }
+  };
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    const u = e.target.username.value;
+    const p = e.target.password.value;
+    const foundUser = users.find(x => x.username === u && x.password === p);
+    if (foundUser) {
+      setCurrentUser(foundUser);
+      setActiveMenu('dashboard');
+    } else {
+      showMessage('Gagal Login', 'Username atau password salah!', 'error');
+    }
+  };
+
+  const handleLogout = () => setCurrentUser(null);
+
+  // --- KOMPONEN UI ---
+  const ModalDialog = () => {
+    if (!dialog) return null;
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 z-[100] flex items-center justify-center p-4 print:hidden">
+        <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6 animate-[fadeIn_0.2s_ease-in-out]">
+          <h3 className={`text-lg font-bold mb-2 ${dialog.type === 'error' ? 'text-red-600' : 'text-gray-900'}`}>{dialog.title}</h3>
+          <p className="text-gray-600 mb-6 text-sm">{dialog.message}</p>
+          <div className="flex justify-end gap-3">
+            {dialog.type === 'confirm' && (
+              <button onClick={() => setDialog(null)} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-300">Batal</button>
+            )}
+            <button 
+              onClick={() => { if (dialog.onConfirm) dialog.onConfirm(); setDialog(null); }} 
+              className={`px-4 py-2 text-white rounded-lg text-sm font-medium shadow-sm transition-colors ${dialog.type === 'error' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+            >
+              {dialog.type === 'confirm' ? 'Ya, Lanjutkan' : 'Tutup'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100 relative bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]">
+        <ModalDialog />
+        <div className="bg-white p-8 rounded-xl shadow-xl w-96 z-10 border border-gray-100">
+          <div className="flex justify-center mb-6">
+            <div className="bg-blue-600 w-16 h-16 rounded-full flex items-center justify-center shadow-lg"><i className="fa-solid fa-gear text-white text-3xl"></i></div>
+          </div>
+          <h2 className="text-2xl font-bold text-center mb-2 text-gray-800">CMMS System</h2>
+          <p className="text-gray-500 text-center mb-6 text-sm">Sistem Manajemen Pemeliharaan</p>
+          
+          {!isDbLoaded ? (
+             <p className="text-center text-blue-600 font-bold p-4 animate-pulse">Menghubungkan ke Database...</p>
+          ) : users.length === 0 ? (
+            <div className="text-center p-4 bg-yellow-50 border border-yellow-200 rounded-lg mb-4">
+              <p className="text-yellow-800 text-sm mb-3 font-bold">Database masih kosong!</p>
+              <button onClick={seedDatabase} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow hover:bg-blue-700">Setup Database Awal</button>
+            </div>
+          ) : (
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Username</label>
+                <input type="text" name="username" required className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" defaultValue="" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Password</label>
+                <input type="password" name="password" required className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" defaultValue="" />
+              </div>
+              <button type="submit" className="w-full flex justify-center py-3 px-4 rounded-lg shadow-md text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 transition-colors">Masuk Sistem</button>
+            </form>
+          )}
+          
+          <div className="mt-6 text-xs text-gray-600 text-center space-y-1 p-3 bg-gray-50 rounded-lg border border-gray-200 shadow-inner">
+            <p className="font-bold text-gray-800 border-b pb-1 mb-1">Aplikasi V.1 By Pamungkas</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const Dashboard = () => {
+    const availableMachines = getAvailableMachines();
+    const openBreakdowns = breakdowns.filter(b => b.status === 'Open' && availableMachines.find(m => m.id === b.machineId));
+    const resolvedBreakdowns = breakdowns.filter(b => b.status === 'Selesai Diperbaiki' && availableMachines.find(m => m.id === b.machineId));
+    
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold text-gray-800">Dashboard Utama</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-500 flex items-center hover:shadow-md transition-shadow">
+            <div className="bg-blue-100 p-3 rounded-full mr-4"><i className="fa-solid fa-industry text-blue-600 text-xl w-6 text-center"></i></div>
+            <div>
+              <p className="text-sm text-gray-500 font-medium">Total Mesin</p>
+              <p className="text-2xl font-bold text-gray-800">{availableMachines.length}</p>
+            </div>
+          </div>
+          <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-red-500 flex items-center hover:shadow-md transition-shadow">
+            <div className="bg-red-100 p-3 rounded-full mr-4"><i className="fa-solid fa-triangle-exclamation text-red-600 text-xl w-6 text-center"></i></div>
+            <div>
+              <p className="text-sm text-gray-500 font-medium">Request Pending</p>
+              <p className="text-2xl font-bold text-gray-800">{openBreakdowns.length}</p>
+            </div>
+          </div>
+          <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-indigo-500 flex items-center hover:shadow-md transition-shadow">
+            <div className="bg-indigo-100 p-3 rounded-full mr-4"><i className="fa-solid fa-wrench text-indigo-600 text-xl w-6 text-center"></i></div>
+            <div>
+              <p className="text-sm text-gray-500 font-medium">Mesin Diperbaiki</p>
+              <p className="text-2xl font-bold text-gray-800">{resolvedBreakdowns.length}</p>
+            </div>
+          </div>
+          <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-green-500 flex items-center hover:shadow-md transition-shadow">
+            <div className="bg-green-100 p-3 rounded-full mr-4"><i className="fa-solid fa-calendar-check text-green-600 text-xl w-6 text-center"></i></div>
+            <div>
+              <p className="text-sm text-gray-500 font-medium">Jadwal PM (Total)</p>
+              <p className="text-2xl font-bold text-gray-800">{pmSchedules.filter(s => availableMachines.find(m => m.id === s.machineId)).length}</p>
+            </div>
+          </div>
+        </div>
+        
+        <div className="bg-gradient-to-r from-blue-50 to-white p-6 rounded-xl shadow-sm mb-6 border border-blue-100">
+          <h3 className="text-lg font-semibold mb-1 text-blue-900">Selamat Datang, {currentUser.name}</h3>
+          <p className="text-gray-600 text-sm">Anda login sebagai <strong>{currentUser.role.toUpperCase()}</strong>. Lingkup operasional: <span className="bg-blue-200 text-blue-800 px-2 py-0.5 rounded font-bold">{currentUser.factory}</span>.</p>
+        </div>
+
+        {currentUser.role === 'admin' && (
+          <div className="space-y-6">
+            <h3 className="text-xl font-bold text-gray-800 border-b pb-2"><i className="fa-solid fa-desktop mr-2 text-gray-500"></i> Panel Monitoring Admin</h3>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-white p-5 rounded-xl shadow-sm border border-red-100">
+                <h4 className="font-bold text-red-700 mb-4 flex items-center"><i className="fa-solid fa-triangle-exclamation mr-2"></i> Permintaan Perbaikan (Pending)</h4>
+                <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
+                  {openBreakdowns.length > 0 ? openBreakdowns.slice().reverse().map(b => {
+                    const machine = machines.find(m => m.id === b.machineId);
+                    return (
+                      <div key={b.id} className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm shadow-sm">
+                        <div className="flex justify-between font-bold text-gray-800 mb-2">
+                          <span>{machine?.name} <span className="text-gray-500 font-normal">({machine?.factory})</span></span>
+                          <span className="text-xs bg-red-200 text-red-800 px-2 py-0.5 rounded-full">Open</span>
+                        </div>
+                        <p className="text-gray-700 mb-2"><span className="font-semibold text-gray-600">Kendala:</span> {b.description}</p>
+                        <div className="text-xs text-gray-500 flex justify-between border-t border-red-200 pt-2">
+                          <span><i className="fa-solid fa-user mr-1"></i> Req: {b.requestBy}</span>
+                          <span><i className="fa-solid fa-clock mr-1"></i> {b.date}</span>
+                        </div>
+                      </div>
+                    )
+                  }) : <p className="text-sm text-gray-500 italic text-center py-8 border border-dashed rounded-lg">Tidak ada permintaan perbaikan pending.</p>}
+                </div>
+              </div>
+              <div className="bg-white p-5 rounded-xl shadow-sm border border-indigo-100">
+                <h4 className="font-bold text-indigo-700 mb-4 flex items-center"><i className="fa-solid fa-circle-check mr-2"></i> Perbaikan Dikerjakan (Terbaru)</h4>
+                <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
+                  {resolvedBreakdowns.length > 0 ? resolvedBreakdowns.slice().reverse().map(b => {
+                    const machine = machines.find(m => m.id === b.machineId);
+                    return (
+                      <div key={b.id} className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg text-sm shadow-sm">
+                        <div className="flex justify-between font-bold text-gray-800 mb-2 border-b border-indigo-200 pb-2">
+                          <span>{machine?.name} <span className="text-gray-500 font-normal">({machine?.factory})</span></span>
+                          <span className="text-xs bg-indigo-200 text-indigo-800 px-2 py-0.5 rounded-full">Selesai</span>
+                        </div>
+                        <p className="text-gray-700 mb-1"><span className="font-semibold">Tindakan:</span> {b.analysis}</p>
+                        <p className="text-gray-700 mb-3"><span className="font-semibold">Part Diganti:</span> {b.partsReplaced}</p>
+                        <div className="text-[11px] text-gray-600 flex justify-between items-end bg-white p-2 rounded border border-indigo-100">
+                          <span>Teknisi: <strong className="text-indigo-900">{b.resolvedBy}</strong></span>
+                          <span className="text-right">Tgl: {b.startTime?.split(' ')[0]}<br/>Jam: {b.startTime?.split(' ')[1]} - {b.endTime?.split(' ')[1]}</span>
+                        </div>
+                      </div>
+                    )
+                  }) : <p className="text-sm text-gray-500 italic text-center py-8 border border-dashed rounded-lg">Belum ada perbaikan yang diselesaikan.</p>}
+                </div>
+              </div>
+            </div>
+            <div className="bg-white p-5 rounded-xl shadow-sm border border-blue-100">
+              <h4 className="font-bold text-blue-700 mb-4 flex items-center"><i className="fa-solid fa-list-check mr-2"></i> Daily Activity Teknisi (Monitoring)</h4>
+              <div className="overflow-x-auto rounded-lg border border-blue-200">
+                <table className="w-full text-sm border-collapse min-w-[700px]">
+                  <thead>
+                    <tr className="bg-blue-100 text-left">
+                      <th className="p-3 font-semibold text-blue-900">Tanggal</th>
+                      <th className="p-3 font-semibold text-blue-900">Teknisi</th>
+                      <th className="p-3 font-semibold text-blue-900">Pabrik</th>
+                      <th className="p-3 font-semibold text-blue-900">Aktivitas / Pekerjaan Tambahan</th>
+                      <th className="p-3 font-semibold text-blue-900">Waktu</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white">
+                    {dailyActivities.slice().reverse().map(act => (
+                      <tr key={act.id} className="border-b border-gray-100 hover:bg-gray-50">
+                        <td className="p-3 whitespace-nowrap text-gray-600">{act.date}</td>
+                        <td className="p-3 font-semibold text-gray-800">{act.teknisi}</td>
+                        <td className="p-3"><span className="text-[10px] uppercase font-bold bg-gray-200 text-gray-700 px-2 py-1 rounded">{act.factory}</span></td>
+                        <td className="p-3 text-gray-700">{act.activity}</td>
+                        <td className="p-3 whitespace-nowrap text-gray-500 font-medium"><i className="fa-solid fa-clock text-gray-400 mr-1"></i> {act.startTime} - {act.endTime}</td>
+                      </tr>
+                    ))}
+                    {dailyActivities.length === 0 && <tr><td colSpan="5" className="p-8 text-center text-gray-500 italic border-t border-dashed">Belum ada catatan aktivitas harian teknisi.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const AdminKelolaPabrik = () => {
+    const [newFactory, setNewFactory] = useState('');
+    const [editId, setEditId] = useState(null);
+    const [editName, setEditName] = useState('');
+
+    const handleAdd = async (e) => {
+      e.preventDefault();
+      if(!newFactory) return;
+      await addDoc(colRef('cmms_factories'), { name: newFactory });
+      setNewFactory('');
+      showMessage('Berhasil', 'Pabrik baru berhasil ditambahkan.', 'success');
+    };
+
+    const handleSaveEdit = (id, oldName) => {
+      if(!editName) return;
+      showConfirm('Konfirmasi Perubahan', `Ubah nama pabrik dari "${oldName}" menjadi "${editName}"? Ini otomatis memperbarui lokasi semua User dan Mesin yang terkait.`, async () => {
+        await updateDoc(docRef('cmms_factories', id), { name: editName });
+        // Batch update is ideally done with batched writes, doing sequential for simplicity
+        users.filter(u => u.factory === oldName).forEach(async u => await updateDoc(docRef('cmms_users', u.id), { factory: editName }));
+        machines.filter(m => m.factory === oldName).forEach(async m => await updateDoc(docRef('cmms_machines', m.id), { factory: editName }));
+        setEditId(null);
+        showMessage('Diperbarui', 'Nama pabrik berhasil diubah beserta relasinya.', 'success');
+      });
+    };
+
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold text-gray-800">Manajemen Pabrik (Lokasi)</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-white p-6 rounded-xl shadow-sm h-fit">
+            <h3 className="font-semibold text-lg mb-4 text-gray-800"><i className="fa-solid fa-industry text-blue-500 mr-2"></i> Tambah Pabrik</h3>
+            <form onSubmit={handleAdd} className="flex gap-2">
+              <input type="text" placeholder="Masukkan Nama Pabrik Baru" required className="flex-1 border p-3 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" value={newFactory} onChange={e => setNewFactory(e.target.value)} />
+              <button type="submit" className="bg-blue-600 text-white px-5 py-3 rounded-lg font-bold hover:bg-blue-700 shadow-sm">Tambah</button>
+            </form>
+          </div>
+          <div className="bg-white p-6 rounded-xl shadow-sm">
+            <h3 className="font-semibold text-lg mb-4">Daftar Pabrik Terdaftar</h3>
+            <ul className="space-y-3">
+              {factories.map(f => (
+                <li key={f.id} className="flex justify-between items-center p-3 bg-gray-50 border rounded-lg">
+                  {editId === f.id ? (
+                    <div className="flex flex-1 gap-2 mr-2">
+                      <input type="text" className="flex-1 border p-2 rounded text-sm" value={editName} onChange={e => setEditName(e.target.value)} />
+                      <button onClick={() => handleSaveEdit(f.id, f.name)} className="bg-green-600 text-white px-4 py-2 rounded text-sm font-bold shadow-sm">Simpan</button>
+                      <button onClick={() => setEditId(null)} className="bg-gray-300 text-gray-800 px-4 py-2 rounded text-sm font-bold">Batal</button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center"><div className="bg-blue-100 text-blue-600 p-2 rounded-lg mr-3"><i className="fa-solid fa-building"></i></div><span className="font-semibold text-gray-800 text-lg">{f.name}</span></div>
+                      <button onClick={() => {setEditId(f.id); setEditName(f.name)}} className="text-gray-400 hover:text-blue-600 bg-white p-2 border rounded shadow-sm"><i className="fa-solid fa-pen-to-square"></i></button>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const AdminKelolaUser = () => {
+    const defaultFactory = factories[0]?.name || '';
+    const [formData, setFormData] = useState({ id: null, username: '', password: '', role: 'user', name: '', factory: defaultFactory });
+    const [isEditing, setIsEditing] = useState(false);
+
+    const handleSubmit = async (e) => {
+      e.preventDefault();
+      const { id, ...dataToSave } = formData;
+      if (isEditing) {
+        await updateDoc(docRef('cmms_users', id), dataToSave);
+        setIsEditing(false);
+        showMessage('Diperbarui', 'Data pengguna berhasil diupdate.', 'success');
+      } else {
+        await addDoc(colRef('cmms_users'), dataToSave);
+        showMessage('Ditambahkan', 'Pengguna baru berhasil dibuat.', 'success');
+      }
+      setFormData({ id: null, username: '', password: '', role: 'user', name: '', factory: defaultFactory });
+    };
+
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold text-gray-800">Manajemen Pengguna (Akun)</h2>
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <div className="bg-white p-6 rounded-xl shadow-sm xl:col-span-1 h-fit border-t-4 border-blue-500">
+            <h3 className="font-semibold text-lg mb-4 text-gray-800 flex items-center">
+              <i className={`fa-solid ${isEditing ? 'fa-user-pen' : 'fa-user-plus'} mr-2 text-blue-500`}></i> {isEditing ? 'Edit Informasi User' : 'Buat User Baru'}
+            </h3>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Nama Lengkap</label>
+                <input type="text" required className="w-full border p-2 rounded-lg" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Username</label>
+                  <input type="text" required className="w-full border p-2 rounded-lg bg-gray-50" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Password</label>
+                  <input type="text" required className="w-full border p-2 rounded-lg bg-gray-50" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Hak Akses</label>
+                  <select className="w-full border p-2 rounded-lg" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})}>
+                    <option value="user">User Produksi</option>
+                    <option value="teknisi">Teknisi</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Lokasi Pabrik</label>
+                  <select className="w-full border p-2 rounded-lg" value={formData.factory} onChange={e => setFormData({...formData, factory: e.target.value})}>
+                    <option value="All">Semua</option>
+                    {factories.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-2 pt-4">
+                <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-lg font-bold shadow-sm flex-1">{isEditing ? 'Simpan' : 'Buat Akun'}</button>
+                {isEditing && <button type="button" onClick={() => {setIsEditing(false); setFormData({ id: null, username: '', password: '', role: 'user', name: '', factory: defaultFactory })}} className="bg-gray-200 text-gray-800 px-4 py-3 rounded-lg font-bold">Batal</button>}
+              </div>
+            </form>
+          </div>
+          <div className="bg-white p-6 rounded-xl shadow-sm xl:col-span-2 overflow-hidden flex flex-col">
+            <h3 className="font-semibold text-lg mb-4 text-gray-800">Daftar Pengguna Sistem</h3>
+            <div className="overflow-x-auto flex-1">
+              <table className="w-full text-sm border-collapse min-w-[500px]">
+                <thead>
+                  <tr className="bg-gray-100 text-left">
+                    <th className="p-3 border-b font-semibold text-gray-700 rounded-tl-lg">Nama Lengkap</th>
+                    <th className="p-3 border-b font-semibold text-gray-700">Akun Login</th>
+                    <th className="p-3 border-b font-semibold text-gray-700">Role</th>
+                    <th className="p-3 border-b font-semibold text-gray-700">Lokasi</th>
+                    <th className="p-3 border-b font-semibold text-gray-700 text-center rounded-tr-lg">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map(u => (
+                    <tr key={u.id} className="border-b border-gray-100 hover:bg-blue-50">
+                      <td className="p-3 font-semibold text-gray-800">{u.name}</td>
+                      <td className="p-3 text-gray-600"><span className="bg-gray-100 px-2 py-1 rounded text-xs border"><i className="fa-solid fa-user-shield text-gray-400 mr-1"></i>{u.username}</span></td>
+                      <td className="p-3"><span className={`px-2 py-1 rounded text-[10px] uppercase font-bold shadow-sm ${u.role==='admin' ? 'bg-purple-600 text-white' : u.role==='teknisi' ? 'bg-blue-500 text-white' : 'bg-gray-400 text-white'}`}>{u.role}</span></td>
+                      <td className="p-3 text-gray-700">{u.factory}</td>
+                      <td className="p-3 text-center">
+                        <button type="button" onClick={() => {setFormData(u); setIsEditing(true);}} className="text-blue-600 bg-blue-50 p-2 rounded-lg border border-blue-200"><i className="fa-solid fa-pen-to-square"></i> Edit</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const AdminKelolaMesin = () => {
+    const defaultFactory = factories[0]?.name || '';
+    const [newMachine, setNewMachine] = useState({ code: '', name: '', location: '', factory: defaultFactory });
+    const [selectedMachineParams, setSelectedMachineParams] = useState(null);
+    const [tempParams, setTempParams] = useState([]);
+    const [newParamText, setNewParamText] = useState('');
+
+    const handleAddMachine = async (e) => {
+      e.preventDefault();
+      await addDoc(colRef('cmms_machines'), newMachine);
+      setNewMachine({ code: '', name: '', location: '', factory: defaultFactory });
+      showMessage('Sukses', 'Mesin baru berhasil ditambahkan.', 'success');
+    };
+
+    const handleSelectMachineParams = (mId) => {
+      setSelectedMachineParams(mId);
+      setTempParams(dailyParams.filter(p => p.machineId === mId).map(p => p.name));
+    };
+
+    const handleSaveChanges = async () => {
+      const oldParams = dailyParams.filter(p => p.machineId === selectedMachineParams);
+      for(const op of oldParams) await deleteDoc(docRef('cmms_dailyParams', op.id));
+      for(const name of tempParams) {
+        await addDoc(colRef('cmms_dailyParams'), { machineId: selectedMachineParams, name: name, type: 'boolean' });
+      }
+      showMessage('Tersimpan', 'Parameter berhasil disimpan secara batch ke Database.', 'success');
+      setSelectedMachineParams(null);
+    };
+
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold text-gray-800">Manajemen Mesin & Master Parameter</h2>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div className="bg-white p-6 rounded-xl shadow-sm">
+            <h3 className="font-semibold text-lg mb-4 text-gray-800 border-b pb-2"><i className="fa-solid fa-server text-blue-500 mr-2"></i> Tambah Inventaris Mesin</h3>
+            <form onSubmit={handleAddMachine} className="space-y-3 bg-gray-50 p-4 rounded-lg border border-gray-100">
+              <div className="flex gap-3">
+                <div className="w-1/3">
+                  <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Kode Mesin</label>
+                  <input type="text" required className="w-full border p-2 rounded" value={newMachine.code} onChange={e => setNewMachine({...newMachine, code: e.target.value})} />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Nama Mesin</label>
+                  <input type="text" required className="w-full border p-2 rounded" value={newMachine.name} onChange={e => setNewMachine({...newMachine, name: e.target.value})} />
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Lokasi Detail</label>
+                  <input type="text" required className="w-full border p-2 rounded" value={newMachine.location} onChange={e => setNewMachine({...newMachine, location: e.target.value})} />
+                </div>
+                <div className="w-1/3">
+                  <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Pabrik Utama</label>
+                  <select className="w-full border p-2 rounded" value={newMachine.factory} onChange={e => setNewMachine({...newMachine, factory: e.target.value})}>
+                    {factories.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 mt-2 rounded-lg font-bold shadow-sm w-full"><i className="fa-solid fa-plus mr-2"></i> Daftarkan Mesin</button>
+            </form>
+
+            <div className="mt-6">
+              <h4 className="font-bold text-gray-700 mb-3 flex items-center justify-between">
+                <span>Daftar Aset Mesin</span><span className="text-xs bg-gray-200 px-2 py-1 rounded-full">{machines.length} Total</span>
+              </h4>
+              <div className="space-y-3 max-h-[400px] overflow-auto pr-2">
+                {machines.map(m => (
+                  <div key={m.id} className="flex justify-between items-center bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                    <div className="flex items-start">
+                      <div className="bg-blue-50 text-blue-600 p-2 rounded-lg mr-3 mt-1"><i className="fa-solid fa-box-open"></i></div>
+                      <div>
+                        <p className="font-bold text-gray-800">{m.name} <span className="text-xs text-gray-500 font-normal">({m.code})</span></p>
+                        <div className="text-[10px] mt-1 space-x-2"><span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded uppercase font-bold">{m.factory}</span></div>
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => handleSelectMachineParams(m.id)} className="bg-gray-800 text-white text-xs px-3 py-2 rounded-lg font-bold">Setup Master Cek</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {selectedMachineParams && (
+            <div className="bg-white p-6 rounded-xl shadow-lg border-2 border-blue-500 sticky top-6">
+              <div className="flex justify-between items-start mb-4 border-b pb-4">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-blue-500">Editor Batch Parameter Harian</span>
+                  <h3 className="font-bold text-xl text-gray-800">{machines.find(m => m.id === selectedMachineParams)?.name}</h3>
+                </div>
+                <button type="button" onClick={() => setSelectedMachineParams(null)} className="bg-gray-100 text-gray-500 hover:text-red-600 w-8 h-8 rounded-full"><i className="fa-solid fa-xmark"></i></button>
+              </div>
+              <form onSubmit={(e) => { e.preventDefault(); if (newParamText) { setTempParams([...tempParams, newParamText]); setNewParamText(''); } }} className="flex gap-2 mb-4">
+                <input type="text" placeholder="Ketik indikator cek..." className="flex-1 border-2 border-gray-200 p-3 rounded-lg text-sm" value={newParamText} onChange={e => setNewParamText(e.target.value)} />
+                <button type="submit" className="bg-gray-800 text-white px-5 py-3 rounded-lg text-sm font-bold">Tambah</button>
+              </form>
+              <ul className="space-y-2 mb-6 max-h-[300px] overflow-y-auto bg-gray-50 p-2 rounded">
+                {tempParams.map((pName, idx) => (
+                  <li key={idx} className="flex justify-between items-center bg-white p-3 rounded-lg border">
+                    <span className="text-sm font-medium text-gray-700">{idx + 1}. {pName}</span>
+                    <button type="button" onClick={() => setTempParams(tempParams.filter((_, i) => i !== idx))} className="text-red-500"><i className="fa-solid fa-trash-can"></i></button>
+                  </li>
+                ))}
+              </ul>
+              <button type="button" onClick={handleSaveChanges} className="w-full bg-green-600 text-white py-4 rounded-xl font-bold shadow-lg"><i className="fa-solid fa-floppy-disk mr-2"></i> Simpan ke Database</button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const UserRequestPerbaikan = () => {
+    const [formData, setFormData] = useState({ machineId: '', description: '' });
+    const availableMachines = getAvailableMachines();
+
+    const handleSubmit = async (e) => {
+      e.preventDefault();
+      await addDoc(colRef('cmms_breakdowns'), {
+        date: new Date().toLocaleString(),
+        ...formData,
+        status: 'Open',
+        reportedBy: currentUser.name,
+        requestBy: currentUser.name,
+        analysis: '', partsReplaced: '', startTime: '', endTime: ''
+      });
+      showMessage('Terkirim', 'Request perbaikan berhasil disimpan ke Database.', 'success');
+      setFormData({ machineId: '', description: '' });
+    };
+
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold text-gray-800">Form Request Perbaikan Mesin</h2>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white p-8 rounded-xl shadow-lg border-t-8 border-red-500 h-fit">
+            <h3 className="font-bold text-xl mb-6 text-gray-800"><i className="fa-solid fa-bullhorn text-red-500 mr-2"></i> Buat Laporan Baru</h3>
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Pilih Aset Mesin ({currentUser.factory})</label>
+                <select required className="w-full border-2 border-gray-200 p-3 rounded-lg" value={formData.machineId} onChange={e => setFormData({...formData, machineId: e.target.value})}>
+                  <option value="">-- Pilih mesin --</option>
+                  {availableMachines.map(m => <option key={m.id} value={m.id}>{m.code} - {m.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Deskripsi Kendala</label>
+                <textarea required rows="5" className="w-full border-2 border-gray-200 p-3 rounded-lg" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})}></textarea>
+              </div>
+              <button type="submit" className="bg-red-600 text-white px-4 py-4 rounded-xl w-full font-bold"><i className="fa-solid fa-paper-plane mr-2"></i> Kirim Request</button>
+            </form>
+          </div>
+          <div className="bg-white p-6 rounded-xl shadow-sm overflow-hidden flex flex-col max-h-[600px]">
+            <h3 className="font-bold text-lg mb-4 text-gray-800">History Request Anda</h3>
+            <div className="space-y-4 overflow-y-auto pr-2">
+              {breakdowns.filter(b => b.reportedBy === currentUser.name).map(b => {
+                const machine = machines.find(m => m.id === b.machineId);
+                return (
+                  <div key={b.id} className={`p-5 border rounded-xl shadow-sm ${b.status === 'Open' ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'}`}>
+                    <div className="flex justify-between items-start mb-3">
+                      <span className="font-bold text-gray-900 text-lg">{machine?.name}</span>
+                      <span className={`text-xs px-3 py-1 rounded-full font-bold ${b.status === 'Open' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{b.status}</span>
+                    </div>
+                    <div className="bg-white p-3 rounded border text-sm text-gray-700 mb-3">{b.description}</div>
+                    <div className="text-[10px] text-gray-400 font-medium"><i className="fa-regular fa-clock mr-1"></i> {b.date}</div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const PenangananKerusakan = () => {
+    const availableMachines = getAvailableMachines();
+    const [resolveId, setResolveId] = useState(null);
+    const [resolveData, setResolveData] = useState({ analysis: '', partsReplaced: '', startDate: '', startTime: '', endTime: '' });
+
+    const handleResolveSubmit = async (e, bId) => {
+      e.preventDefault();
+      showConfirm('Selesaikan Perbaikan?', 'Data penanganan ini akan disimpan permanen.', async () => {
+        await updateDoc(docRef('cmms_breakdowns', bId), {
+          status: 'Selesai Diperbaiki', 
+          resolvedBy: currentUser.name, 
+          resolveDate: new Date().toLocaleString(),
+          analysis: resolveData.analysis,
+          partsReplaced: resolveData.partsReplaced,
+          startTime: `${resolveData.startDate} ${resolveData.startTime}`,
+          endTime: `${resolveData.startDate} ${resolveData.endTime}`
+        });
+        setResolveId(null);
+        showMessage('Selesai', 'Perbaikan berhasil dicatat ke Database.', 'success');
+      });
+    };
+
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold text-gray-800">Manajemen Penanganan Breakdown</h2>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white p-6 rounded-xl shadow-sm border-t-4 border-red-500">
+            <h3 className="font-semibold text-lg mb-4 text-red-700 border-b pb-2"><i className="fa-solid fa-screwdriver-wrench mr-2"></i> Antrean Perbaikan (Open)</h3>
+            <div className="space-y-4">
+              {breakdowns.filter(b => b.status === 'Open' && availableMachines.find(m => m.id === b.machineId)).map(b => {
+                const machine = machines.find(m => m.id === b.machineId);
+                const isResolving = resolveId === b.id;
+                return (
+                  <div key={b.id} className={`p-4 rounded-xl border ${isResolving ? 'border-blue-400 bg-blue-50' : 'border-red-200 bg-white'}`}>
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="font-bold text-gray-900 text-lg block">{machine?.name}</span>
+                      <span className="text-xs font-bold text-white bg-red-500 px-2 py-0.5 rounded">{machine?.factory}</span>
+                    </div>
+                    <div className="bg-gray-50 border p-3 rounded-lg mb-3 relative">
+                      <span className="absolute -top-2 left-3 bg-gray-50 text-[10px] font-bold text-gray-400 px-1">Laporan: {b.requestBy}</span>
+                      <p className="text-sm text-gray-800 mt-1">{b.description}</p>
+                    </div>
+                    {!isResolving ? (
+                      <button onClick={() => {setResolveId(b.id); setResolveData({ analysis: '', partsReplaced: '', startDate: new Date().toISOString().split('T')[0], startTime: '', endTime: '' })}} className="w-full bg-blue-600 text-white font-bold px-4 py-3 rounded-lg"><i className="fa-solid fa-hand-pointer mr-2"></i> Ambil Pekerjaan Ini</button>
+                    ) : (
+                      <form onSubmit={(e) => handleResolveSubmit(e, b.id)} className="bg-white p-4 rounded-lg border-2 border-blue-200 mt-4">
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-xs font-bold mb-1">Analisa & Tindakan</label>
+                            <textarea required className="w-full border-2 p-2 text-sm rounded-lg" rows="2" value={resolveData.analysis} onChange={e => setResolveData({...resolveData, analysis: e.target.value})}></textarea>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold mb-1">Part Diganti</label>
+                            <input required type="text" className="w-full border-2 p-2 text-sm rounded-lg" value={resolveData.partsReplaced} onChange={e => setResolveData({...resolveData, partsReplaced: e.target.value})} />
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div><label className="block text-[9px] font-bold">Tgl</label><input required type="date" className="w-full border p-2 text-sm" value={resolveData.startDate} onChange={e => setResolveData({...resolveData, startDate: e.target.value})} /></div>
+                            <div><label className="block text-[9px] font-bold">Jam Mulai</label><input required type="time" className="w-full border p-2 text-sm" value={resolveData.startTime} onChange={e => setResolveData({...resolveData, startTime: e.target.value})} /></div>
+                            <div><label className="block text-[9px] font-bold">Jam Selesai</label><input required type="time" className="w-full border p-2 text-sm" value={resolveData.endTime} onChange={e => setResolveData({...resolveData, endTime: e.target.value})} /></div>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 mt-4">
+                          <button type="submit" className="flex-1 bg-green-600 text-white font-bold py-3 rounded-lg text-sm"><i className="fa-solid fa-check mr-2"></i> Selesaikan</button>
+                          <button type="button" onClick={() => setResolveId(null)} className="bg-gray-200 text-gray-700 font-bold px-4 py-3 rounded-lg text-sm">Batal</button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+          <div className="bg-white p-6 rounded-xl shadow-sm border-t-4 border-green-500">
+            <h3 className="font-semibold text-lg mb-4 text-green-700 border-b pb-2"><i className="fa-solid fa-clock-rotate-left mr-2"></i> Histori Pekerjaan Selesai</h3>
+            <div className="space-y-4 max-h-[600px] overflow-y-auto">
+              {breakdowns.filter(b => b.status === 'Selesai Diperbaiki' && availableMachines.find(m => m.id === b.machineId)).map(b => {
+                const machine = machines.find(m => m.id === b.machineId);
+                return (
+                  <div key={b.id} className="p-4 border bg-white rounded-xl shadow-sm relative">
+                    <span className="font-bold text-gray-900 block">{machine?.name}</span>
+                    <p className="text-sm text-gray-600 mb-2 italic">"{b.description}"</p>
+                    <div className="text-sm bg-green-50 p-3 rounded-lg border border-green-100 mb-3 text-gray-800">
+                      <p className="mb-1"><span className="font-bold text-green-800 text-[10px] uppercase block">Tindakan:</span> {b.analysis}</p>
+                      <p><span className="font-bold text-green-800 text-[10px] uppercase block">Part Ganti:</span> {b.partsReplaced}</p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const TeknisiDailyActivity = () => {
+    const [formData, setFormData] = useState({ date: new Date().toISOString().split('T')[0], startTime: '', endTime: '', activity: '' });
+    const handleSubmit = async (e) => {
+      e.preventDefault();
+      await addDoc(colRef('cmms_dailyActivities'), { teknisi: currentUser.name, factory: currentUser.factory, ...formData });
+      showMessage('Tersimpan', 'Aktivitas harian disinkronkan ke Database.', 'success');
+      setFormData({ ...formData, startTime: '', endTime: '', activity: '' });
+    };
+    const myActivities = dailyActivities.filter(a => a.teknisi === currentUser.name);
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-blue-900 text-white p-6 rounded-xl shadow-md"><h2 className="text-2xl font-bold">Jurnal Aktivitas Harian</h2></div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white p-6 rounded-xl shadow-sm border h-fit">
+            <h3 className="font-bold text-lg mb-5 border-b pb-2"><i className="fa-solid fa-pen-clip mr-2 text-blue-500"></i> Entri Aktivitas Baru</h3>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <input required type="date" className="w-full border-2 p-3 rounded-lg" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
+              <div className="grid grid-cols-2 gap-3">
+                <input required type="time" className="w-full border-2 p-3 rounded-lg" value={formData.startTime} onChange={e => setFormData({...formData, startTime: e.target.value})} />
+                <input required type="time" className="w-full border-2 p-3 rounded-lg" value={formData.endTime} onChange={e => setFormData({...formData, endTime: e.target.value})} />
+              </div>
+              <textarea required rows="4" className="w-full border-2 p-3 rounded-lg" placeholder="Deskripsi aktivitas..." value={formData.activity} onChange={e => setFormData({...formData, activity: e.target.value})}></textarea>
+              <button type="submit" className="w-full bg-gray-900 text-white py-4 rounded-lg font-bold"><i className="fa-solid fa-floppy-disk mr-2"></i> Simpan ke Jurnal</button>
+            </form>
+          </div>
+          <div className="bg-white p-6 rounded-xl shadow-sm md:col-span-2 overflow-auto max-h-[650px]">
+            <h3 className="font-bold text-lg mb-4">Riwayat Jurnal Anda</h3>
+            <div className="space-y-4">
+              {myActivities.map(act => (
+                <div key={act.id} className="flex p-4 border rounded-xl shadow-sm">
+                  <div className="mr-4 flex flex-col items-center justify-center border-r pr-4 min-w-[80px]">
+                    <span className="text-xl font-black text-blue-600">{act.date.split('-')[2]}</span>
+                  </div>
+                  <div className="flex-1">
+                    <span className="text-xs font-bold bg-blue-100 text-blue-800 px-2 py-1 rounded"><i className="fa-regular fa-clock mr-1"></i> {act.startTime} - {act.endTime}</span>
+                    <p className="text-sm text-gray-700 font-medium mt-2">{act.activity}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const CekHarian = () => {
+    const [selectedMachine, setSelectedMachine] = useState(null);
+    const [checkData, setCheckData] = useState({});
+    const availableMachines = getAvailableMachines();
+    const params = selectedMachine ? dailyParams.filter(p => p.machineId === selectedMachine) : [];
+
+    const handleSaveCheck = async (e) => {
+      e.preventDefault();
+      await addDoc(colRef('cmms_dailyChecks'), { date: new Date().toISOString().split('T')[0], machineId: selectedMachine, teknisi: currentUser.name, results: checkData });
+      showMessage('Pengecekan Selesai', 'Data checklist harian mesin berhasil disubmit ke Database.', 'success');
+      setSelectedMachine(null);
+      setCheckData({});
+    };
+
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold text-gray-800">Form Checklist Harian</h2>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <h3 className="text-xs font-bold text-gray-500 uppercase mb-4 border-b pb-2">1. Pilih Aset Mesin</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
+            {availableMachines.map(m => (
+              <div key={m.id} onClick={() => { setSelectedMachine(m.id); setCheckData({}); }} className={`cursor-pointer border-2 p-4 rounded-2xl flex flex-col items-center text-center transition-all ${selectedMachine === m.id ? 'bg-blue-600 border-blue-600 shadow-lg scale-105' : 'bg-white hover:border-blue-300'}`}>
+                <div className={`text-3xl mb-2 ${selectedMachine === m.id ? 'text-white' : 'text-gray-400'}`}><i className="fa-solid fa-box"></i></div>
+                <span className={`text-[11px] font-bold ${selectedMachine === m.id ? 'text-white' : 'text-gray-800'}`}>{m.name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        {selectedMachine && (
+          <div className="bg-white p-6 rounded-xl shadow-xl border-t-8 border-blue-500">
+            <h3 className="text-xl font-bold mb-6 flex items-center border-b pb-4"><i className="fa-solid fa-list-check text-blue-500 mr-3"></i> Lembar Cek: {machines.find(m=>m.id === selectedMachine)?.name}</h3>
+            {params.length > 0 ? (
+              <form onSubmit={handleSaveCheck}>
+                <div className="space-y-4 mb-8">
+                  {params.map((p, idx) => {
+                    const status = checkData[p.id]?.status;
+                    return (
+                      <div key={p.id} className="p-4 border-2 rounded-xl bg-gray-50 flex flex-col md:flex-row justify-between gap-4">
+                        <p className="font-bold flex-1 text-sm">{idx+1}. {p.name}</p>
+                        <div className="flex gap-2">
+                          <label className={`flex items-center px-4 py-2 rounded-lg cursor-pointer text-sm font-bold border-2 ${status === 'OK' ? 'bg-green-100 text-green-700 border-green-500' : 'bg-white border-gray-200'}`}>
+                            <input type="radio" required name={`param_${p.id}`} className="hidden" onChange={() => setCheckData({...checkData, [p.id]: { status: 'OK', note: checkData[p.id]?.note || '' }})} /> Normal
+                          </label>
+                          <label className={`flex items-center px-4 py-2 rounded-lg cursor-pointer text-sm font-bold border-2 ${status === 'NG' ? 'bg-red-100 text-red-700 border-red-500' : 'bg-white border-gray-200'}`}>
+                            <input type="radio" required name={`param_${p.id}`} className="hidden" onChange={() => setCheckData({...checkData, [p.id]: { status: 'NG', note: checkData[p.id]?.note || '' }})} /> Abnormal
+                          </label>
+                        </div>
+                        {status === 'NG' && <input type="text" placeholder="Ket. abnormal" required className="w-full md:w-48 border-2 border-red-300 p-2 text-sm rounded bg-red-50" onChange={(e) => setCheckData({...checkData, [p.id]: { ...checkData[p.id], note: e.target.value }})} />}
+                      </div>
+                    )
+                  })}
+                </div>
+                <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-xl font-black text-lg shadow-lg">Submit Hasil Ke Database</button>
+              </form>
+            ) : (
+              <div className="text-center py-12 border-2 border-dashed border-red-200 bg-red-50 rounded-xl"><p className="text-red-800 font-bold">Parameter Belum Diatur Admin!</p></div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const SetupPM = () => {
+    const [newSchedule, setNewSchedule] = useState({ machineId: '', date: '', title: '' });
+    const [selectedSchedule, setSelectedSchedule] = useState(null);
+    const [tempTasks, setTempTasks] = useState([]);
+    const [newTaskText, setNewTaskText] = useState('');
+
+    const handleCreateSchedule = async (e) => {
+      e.preventDefault();
+      await addDoc(colRef('cmms_pmSchedules'), { ...newSchedule, status: 'Pending', executedBy: null, verifiedBy: null, executionNote: '' });
+      setNewSchedule({ machineId: '', date: '', title: '' });
+      showMessage('Berhasil', 'Jadwal PM baru disimpan ke Database.', 'success');
+    };
+
+    const handleSelectSchedule = (sId) => {
+      setSelectedSchedule(sId);
+      setTempTasks(pmParams.filter(p => p.scheduleId === sId).map(p => p.task));
+    };
+
+    const handleSaveTasks = async () => {
+      const oldTasks = pmParams.filter(p => p.scheduleId === selectedSchedule);
+      for(const ot of oldTasks) await deleteDoc(docRef('cmms_pmParams', ot.id));
+      for(const task of tempTasks) {
+        await addDoc(colRef('cmms_pmParams'), { scheduleId: selectedSchedule, task: task });
+      }
+      showMessage('Tersimpan', 'Daftar SOP PM berhasil disimpan.', 'success');
+      setSelectedSchedule(null);
+    };
+
+    const handleVerify = (id) => {
+      showConfirm('Otorisasi Verifikasi', 'TTD Digital Anda akan dibubuhkan.', async () => {
+        await updateDoc(docRef('cmms_pmSchedules', id), { status: 'Terverifikasi', verifiedBy: currentUser.name, verifyDate: new Date().toISOString().split('T')[0] });
+      });
+    };
+
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold text-gray-800">Perencanaan & Verifikasi PM</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-fit">
+            <h3 className="font-semibold text-lg mb-4 text-gray-800 border-b pb-2"><i className="fa-regular fa-calendar-plus text-blue-500 mr-2"></i> Terbitkan Jadwal PM</h3>
+            <form onSubmit={handleCreateSchedule} className="space-y-4">
+              <select required className="w-full border-2 p-3 rounded-lg" value={newSchedule.machineId} onChange={e => setNewSchedule({...newSchedule, machineId: e.target.value})}>
+                <option value="">-- Pilih Mesin --</option>
+                {machines.map(m => <option key={m.id} value={m.id}>[{m.factory}] {m.name}</option>)}
+              </select>
+              <input required type="text" placeholder="Judul PM..." className="w-full border-2 p-3 rounded-lg" value={newSchedule.title} onChange={e => setNewSchedule({...newSchedule, title: e.target.value})} />
+              <input required type="date" className="w-full border-2 p-3 rounded-lg" value={newSchedule.date} onChange={e => setNewSchedule({...newSchedule, date: e.target.value})} />
+              <button type="submit" className="bg-blue-600 text-white px-4 py-4 rounded-xl w-full font-bold">Terbitkan Instruksi</button>
+            </form>
+            <div className="mt-8 border-t pt-6">
+              <h4 className="font-bold text-gray-700 mb-3">Database Jadwal PM</h4>
+              <div className="space-y-3 max-h-80 overflow-y-auto">
+                {pmSchedules.map(sch => (
+                  <div key={sch.id} onClick={() => handleSelectSchedule(sch.id)} className={`p-4 border rounded-xl cursor-pointer ${selectedSchedule === sch.id ? 'border-indigo-500 bg-indigo-50' : 'bg-white'}`}>
+                    <p className="font-bold">{sch.title}</p>
+                    <p className="text-xs text-gray-600">{machines.find(m => m.id === sch.machineId)?.name} | Status: {sch.status}</p>
+                    {sch.status === 'Selesai' && (
+                      <button onClick={(e) => { e.stopPropagation(); handleVerify(sch.id); }} className="mt-2 bg-green-600 text-white text-xs px-3 py-1 rounded font-bold w-full">Verifikasi PM Ini</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          {selectedSchedule && (
+            <div className="bg-white p-6 rounded-xl shadow-lg border-2 border-indigo-500 sticky top-6">
+              <h3 className="font-bold text-xl mb-4">SOP PM: {pmSchedules.find(s => s.id === selectedSchedule)?.title}</h3>
+              <form onSubmit={e => { e.preventDefault(); if(newTaskText) { setTempTasks([...tempTasks, newTaskText]); setNewTaskText(''); } }} className="flex gap-2 mb-4">
+                <input type="text" placeholder="Ketik rincian pekerjaan..." className="flex-1 border-2 p-3 rounded-lg text-sm" value={newTaskText} onChange={e => setNewTaskText(e.target.value)} />
+                <button type="submit" className="bg-indigo-900 text-white px-5 py-3 rounded-lg text-sm font-bold">Tambah</button>
+              </form>
+              <ul className="space-y-2 mb-6 max-h-[300px] overflow-y-auto bg-gray-50 p-2">
+                {tempTasks.map((task, idx) => (
+                  <li key={idx} className="flex justify-between p-3 bg-white rounded border">
+                    <span className="text-sm">{idx + 1}. {task}</span>
+                    <button type="button" onClick={() => setTempTasks(tempTasks.filter((_, i) => i !== idx))} className="text-red-500"><i className="fa-solid fa-trash-can"></i></button>
+                  </li>
+                ))}
+              </ul>
+              <button type="button" onClick={handleSaveTasks} className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold">Simpan SOP ke Database</button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const EksekusiPM = () => {
+    const pendingSchedules = pmSchedules.filter(s => s.status === 'Pending' && getAvailableMachines().find(m => m.id === s.machineId));
+    const [pmForms, setPmForms] = useState({});
+
+    const handleSelesaikanPM = (scheduleId) => {
+      const formData = pmForms[scheduleId] || {};
+      if(!formData.executeDate || !formData.startTime || !formData.endTime) {
+        showMessage('Data Tidak Lengkap', 'Lengkapi Durasi Waktu Pengerjaan.', 'error');
+        return;
+      }
+      showConfirm('Submit Laporan', 'Dokumen pelaksanaan PM akan disimpan ke Database.', async () => {
+        await updateDoc(docRef('cmms_pmSchedules', scheduleId), {
+          status: 'Selesai', executedBy: currentUser.name, executeDate: formData.executeDate, pmStartTime: formData.startTime, pmEndTime: formData.endTime, executionNote: formData.note || '-'
+        });
+        showMessage('Berhasil', 'Dokumen terkirim ke Supervisor.', 'success');
+      });
+    };
+
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold">Eksekusi Preventive Maintenance (PM)</h2>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          {pendingSchedules.map(sch => {
+            const machine = machines.find(m => m.id === sch.machineId);
+            const tasks = pmParams.filter(p => p.scheduleId === sch.id);
+            const form = pmForms[sch.id] || { executeDate: new Date().toISOString().split('T')[0], startTime: '', endTime: '', note: '' };
+            return (
+              <div key={sch.id} className="bg-white p-6 rounded-xl shadow-md border-t-8 border-blue-500 flex flex-col">
+                <h3 className="font-bold text-xl mb-1">{sch.title}</h3>
+                <p className="text-sm text-gray-600 mb-4">{machine?.name} ({machine?.code})</p>
+                <div className="mb-4 bg-gray-50 p-4 rounded border">
+                  <h4 className="text-sm font-bold mb-2">SOP Pekerjaan:</h4>
+                  <ul className="space-y-2 mb-4">
+                    {tasks.map(t => <li key={t.id} className="text-sm flex"><input type="checkbox" className="mr-2 mt-1"/> {t.task}</li>)}
+                  </ul>
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    <div><label className="text-[9px] font-bold">Tgl</label><input type="date" className="w-full border p-2" value={form.executeDate} onChange={e => setPmForms({...pmForms, [sch.id]:{...form, executeDate: e.target.value}})} /></div>
+                    <div><label className="text-[9px] font-bold">Jam Mulai</label><input type="time" className="w-full border p-2" value={form.startTime} onChange={e => setPmForms({...pmForms, [sch.id]:{...form, startTime: e.target.value}})} /></div>
+                    <div><label className="text-[9px] font-bold">Jam Selesai</label><input type="time" className="w-full border p-2" value={form.endTime} onChange={e => setPmForms({...pmForms, [sch.id]:{...form, endTime: e.target.value}})} /></div>
+                  </div>
+                  <textarea rows="2" className="w-full border p-2 text-sm" placeholder="Catatan tambahan..." value={form.note} onChange={e => setPmForms({...pmForms, [sch.id]:{...form, note: e.target.value}})}></textarea>
+                </div>
+                <button type="button" onClick={() => handleSelesaikanPM(sch.id)} className="w-full bg-blue-600 text-white py-3 rounded font-bold"><i className="fa-solid fa-qrcode mr-2"></i> Submit Data PM</button>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const CetakLaporan = () => {
+    // Komponen cetak laporan dipertahankan namun menggunakan format pencarian id berupa string
+    const [activeTab, setActiveTab] = useState('harian');
+    const [filterFactory, setFilterFactory] = useState('All');
+    const [filterMachine, setFilterMachine] = useState('');
+    const [filterMonth, setFilterMonth] = useState('');
+    
+    const machinesToPrint = filterFactory === 'All' ? machines : machines.filter(m => m.factory === filterFactory);
+    const filteredChecks = dailyChecks.filter(c => {
+      const matchMachine = filterMachine ? c.machineId === filterMachine : machinesToPrint.find(m => m.id === c.machineId);
+      const matchMonth = filterMonth ? c.date.startsWith(filterMonth) : true;
+      return matchMachine && matchMonth;
+    });
+
+    return (
+      <div className="space-y-6">
+        <div className="print:hidden">
+          <div className="bg-gray-800 text-white p-6 rounded-xl mb-6">
+            <h2 className="text-2xl font-bold">Pusat Cetak Dokumen</h2>
+          </div>
+          <div className="bg-white p-6 rounded-xl flex gap-4 items-end mb-6 border">
+            <div>
+              <label className="block text-xs font-bold mb-1">Filter Mesin</label>
+              <select className="border-2 p-3 rounded" value={filterMachine} onChange={e => setFilterMachine(e.target.value)}>
+                <option value="">Semua Mesin</option>
+                {machinesToPrint.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold mb-1">Bulan</label>
+              <input type="month" className="border-2 p-3 rounded" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} />
+            </div>
+            <button onClick={() => window.print()} className="bg-gray-900 text-white px-6 py-3 rounded-lg font-bold">Cetak / PDF</button>
+          </div>
+        </div>
+
+        <div className="bg-white p-8 rounded-xl print:p-0 border print:border-0">
+          <h1 className="text-2xl font-bold uppercase mb-4">Laporan Pengecekan Harian</h1>
+          <table className="w-full border-collapse border border-gray-900 text-sm">
+            <thead>
+              <tr className="bg-gray-200">
+                <th className="border border-gray-900 p-2">Tanggal</th>
+                <th className="border border-gray-900 p-2">Aset Mesin</th>
+                <th className="border border-gray-900 p-2">Teknisi</th>
+                <th className="border border-gray-900 p-2">Hasil Cek</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredChecks.map(check => {
+                const machine = machines.find(m => m.id === check.machineId);
+                return (
+                  <tr key={check.id}>
+                    <td className="border border-gray-900 p-2 text-center">{check.date}</td>
+                    <td className="border border-gray-900 p-2 font-bold">{machine?.name}</td>
+                    <td className="border border-gray-900 p-2 text-center">{check.teknisi}</td>
+                    <td className="border border-gray-900 p-2">
+                      <ul className="space-y-1">
+                        {Object.entries(check.results).map(([paramId, res]) => (
+                          <li key={paramId} className="text-xs">
+                            <span className="font-bold">{dailyParams.find(p => p.id === paramId)?.name || 'Terhapus'}</span>: [{res.status}] {res.note && `(${res.note})`}
+                          </li>
+                        ))}
+                      </ul>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  const NavItem = ({ id, icon, label, roles }) => {
+    if (!roles.includes(currentUser.role)) return null;
+    return (
+      <button onClick={() => {setActiveMenu(id); setIsSidebarOpen(false)}} className={`w-full flex items-center px-4 py-3 rounded-lg text-left font-medium text-sm ${activeMenu === id ? 'bg-blue-600 text-white' : 'text-blue-100 hover:bg-blue-800'}`}>
+        <i className={`fa-solid ${icon} w-6 mr-3 text-lg`}></i> <span>{label}</span>
+      </button>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex text-gray-900 font-sans">
+      <ModalDialog />
+      <aside className={`print:hidden fixed inset-y-0 left-0 bg-gray-900 text-white w-72 transform ${isSidebarOpen ? '-translate-x-full' : 'translate-x-0'} md:relative md:translate-x-0 transition-transform z-30 flex flex-col shadow-2xl`}>
+        <div className="p-6 border-b border-gray-800 bg-gray-950 flex justify-between items-center">
+          <h1 className="text-xl font-black uppercase">CMMS Pro</h1>
+          <button className="md:hidden" onClick={() => setIsSidebarOpen(false)}><i className="fa-solid fa-xmark text-xl"></i></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 pb-24">
+          <div className="mb-8 bg-gray-800 p-4 rounded-xl border border-gray-700">
+            <p className="font-bold text-white mb-2">{currentUser.name}</p>
+            <div className="flex flex-wrap gap-2">
+              <span className="text-[9px] uppercase font-bold bg-blue-600 px-2 py-1 rounded">{currentUser.role}</span>
+              <span className="text-[9px] uppercase font-bold bg-gray-700 px-2 py-1 rounded">{currentUser.factory}</span>
+            </div>
+          </div>
+          <nav className="space-y-1">
+            <NavItem id="dashboard" icon="fa-chart-pie" label="Dashboard" roles={['admin', 'teknisi', 'user']} />
+            <div className={currentUser.role === 'admin' ? 'pt-6 pb-2' : 'hidden'}>
+              <NavItem id="kelola_pabrik" icon="fa-city" label="Master Pabrik / Lokasi" roles={['admin']} />
+              <NavItem id="kelola_user" icon="fa-users-gear" label="Manajemen Akun" roles={['admin']} />
+              <NavItem id="kelola_mesin" icon="fa-network-wired" label="Aset & Parameter" roles={['admin']} />
+              <NavItem id="setup_pm" icon="fa-calendar-days" label="Jadwal & Verifikasi PM" roles={['admin']} />
+              <NavItem id="cetak" icon="fa-print" label="Pusat Dokumen (Cetak)" roles={['admin']} />
+            </div>
+            <div className={currentUser.role === 'teknisi' ? 'pt-6 pb-2' : 'hidden'}>
+              <NavItem id="daily_activity" icon="fa-book-open" label="Buku Jurnal Harian" roles={['teknisi']} />
+              <NavItem id="cek_harian" icon="fa-clipboard-list" label="Checklist Rutin Mesin" roles={['teknisi']} />
+              <NavItem id="penanganan_rusak" icon="fa-screwdriver-wrench" label="Tangani Breakdown" roles={['teknisi']} />
+              <NavItem id="eksekusi_pm" icon="fa-business-time" label="Jadwal PM Aktif" roles={['teknisi']} />
+            </div>
+            <div className={currentUser.role === 'user' ? 'pt-6 pb-2' : 'hidden'}>
+              <NavItem id="req_perbaikan" icon="fa-triangle-exclamation" label="Lapor Kendala Mesin" roles={['user']} />
+            </div>
+          </nav>
+        </div>
+        <div className="absolute bottom-0 w-full p-4 bg-gray-950"><button onClick={handleLogout} className="bg-red-600 text-white w-full p-3 rounded font-bold"><i className="fa-solid fa-power-off mr-2"></i> KELUAR</button></div>
+      </aside>
+      <main className="flex-1 flex flex-col bg-gray-50 overflow-hidden relative">
+        <header className="print:hidden bg-white shadow-sm border-b h-16 flex items-center px-4 md:px-8 z-10 sticky top-0">
+          <button className="md:hidden mr-4 text-gray-600" onClick={() => setIsSidebarOpen(true)}><i className="fa-solid fa-bars-staggered"></i></button>
+          <h2 className="text-lg font-black uppercase text-gray-800">{activeMenu.replace('_', ' ')}</h2>
+        </header>
+        <div className="flex-1 overflow-auto p-4 md:p-8 print:p-0">
+          {activeMenu === 'dashboard' && <Dashboard />}
+          {activeMenu === 'kelola_pabrik' && <AdminKelolaPabrik />}
+          {activeMenu === 'kelola_user' && <AdminKelolaUser />}
+          {activeMenu === 'kelola_mesin' && <AdminKelolaMesin />}
+          {activeMenu === 'setup_pm' && <SetupPM />}
+          {activeMenu === 'cetak' && <CetakLaporan />}
+          {activeMenu === 'daily_activity' && <TeknisiDailyActivity />}
+          {activeMenu === 'cek_harian' && <CekHarian />}
+          {activeMenu === 'penanganan_rusak' && <PenangananKerusakan />}
+          {activeMenu === 'eksekusi_pm' && <EksekusiPM />}
+          {activeMenu === 'req_perbaikan' && <UserRequestPerbaikan />}
+        </div>
+      </main>
+    </div>
+  );
+}
