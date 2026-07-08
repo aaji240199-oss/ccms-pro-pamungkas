@@ -1437,48 +1437,93 @@ export default function App() {
 
         {/* HALAMAN CETAK: PREVENTIVE MAINTENANCE */}
         {activeTab === 'pm' && (
-           <div className="bg-white p-8 rounded-xl print:p-0 border print:border-0 print:shadow-none shadow-sm">
-             <h1 className="text-2xl font-bold uppercase mb-4 text-center print:text-left border-b-2 border-gray-900 pb-2">Laporan Preventive Maintenance (PM)</h1>
-             <table className="w-full border-collapse border border-gray-900 text-sm">
-               <thead>
-                 <tr className="bg-gray-200">
-                   <th className="border border-gray-900 p-2">Tgl Eksekusi</th>
-                   <th className="border border-gray-900 p-2">Data Mesin</th>
-                   <th className="border border-gray-900 p-2">Judul PM & Catatan</th>
-                   <th className="border border-gray-900 p-2">Otorisasi (Teknisi & SPV)</th>
-                 </tr>
-               </thead>
-               <tbody>
-                 {filteredPMs.length > 0 ? filteredPMs.map(pm => {
-                   const machine = machines.find(m => m.id === pm.machineId);
-                   return (
-                     <tr key={pm.id}>
-                       <td className="border border-gray-900 p-2 text-center whitespace-nowrap align-top">
-                          <strong>{pm.executeDate}</strong><br/>
-                          <span className="text-xs text-gray-600">{pm.pmStartTime} - {pm.pmEndTime}</span>
-                       </td>
-                       <td className="border border-gray-900 p-2 align-top">
-                         <span className="font-bold text-base">{machine?.name}</span><br/>
-                         <span className="text-xs bg-gray-100 px-1 py-0.5 border border-gray-300 rounded print:border-none print:p-0">{machine?.code} | {machine?.factory}</span>
-                       </td>
-                       <td className="border border-gray-900 p-2 align-top">
-                         <strong className="block mb-1">{pm.title}</strong>
-                         <p className="text-xs italic text-gray-700">Catatan: {pm.executionNote || '-'}</p>
-                       </td>
-                       <td className="border border-gray-900 p-2 align-top">
-                         <div className="text-xs mb-1"><span className="text-gray-500 w-16 inline-block">Pelaksana:</span> <strong>{pm.executedBy}</strong></div>
-                         <div className="text-xs"><span className="text-gray-500 w-16 inline-block">Verifikator:</span> <strong>{pm.verifiedBy || '-'}</strong></div>
-                         <div className="mt-2 text-[10px] font-bold uppercase p-1 text-center border bg-gray-50">{pm.status}</div>
-                       </td>
-                     </tr>
-                   )
-                 }) : (
-                   <tr><td colSpan="4" className="border border-gray-900 p-8 text-center text-gray-500 font-bold">Data tidak ditemukan sesuai filter.</td></tr>
-                 )}
-               </tbody>
-             </table>
-           </div>
-        )}
+  <div className="space-y-12">
+    {filteredPMs.length > 0 ? filteredPMs.map(pm => {
+      const machine = machines.find(m => m.id === pm.machineId);
+      const tasks = pmParams.filter(p => p.scheduleId === pm.id);
+      
+      // Data QR Code
+      const qrTeknisiData = encodeURIComponent(`Sign:${pm.executedBy}|Date:${pm.executeDate}|ID:${pm.id}`);
+      const qrSpvData = encodeURIComponent(`VerifiedBy:${pm.verifiedBy}|Date:${pm.verifyDate}|ID:${pm.id}`);
+      const qrTeknisi = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${qrTeknisiData}`;
+      const qrSupervisor = pm.status === 'Terverifikasi' ? `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${qrSpvData}` : null;
+
+      return (
+        <div key={pm.id} className="border-4 border-gray-900 p-8 rounded-xl bg-white break-inside-avoid shadow-sm print:shadow-none relative">
+          {/* Watermark */}
+          {pm.status === 'Terverifikasi' && (
+            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 rotate-[-30deg] opacity-[0.03] print:opacity-10 pointer-events-none z-0">
+              <span className="text-8xl font-black uppercase text-gray-900 border-8 border-gray-900 px-6 py-2 rounded-xl whitespace-nowrap">Verified Document</span>
+            </div>
+          )}
+
+          {/* Header Sertifikat */}
+          <div className="flex justify-between border-b-2 border-gray-900 pb-6 mb-6 relative z-10">
+            <div className="flex-1">
+              <span className="bg-gray-900 text-white font-bold text-[10px] uppercase tracking-widest px-2 py-1 mb-2 inline-block">Doc ID: PM-{pm.id.toString().slice(-6)}</span>
+              <h4 className="font-black text-2xl uppercase text-gray-900 leading-tight mb-2">{pm.title}</h4>
+              <div className="text-gray-800 text-sm p-3 bg-gray-100 border border-gray-300 rounded inline-block print:bg-transparent print:border-gray-900">
+                <p className="font-bold text-lg mb-1"><i className="fa-solid fa-microchip mr-2"></i>{machine?.name || 'Unknown'}</p>
+                <p className="text-xs uppercase tracking-wide">Aset Code: <strong>{machine?.code || '-'}</strong> | Lokasi: <strong>{machine?.factory || '-'}</strong></p>
+              </div>
+            </div>
+            {/* Info Tanggal */}
+            <div className="text-right text-sm border-l-2 border-gray-900 pl-6 flex flex-col justify-center bg-gray-50 p-4 rounded print:bg-transparent print:p-0 print:border-0">
+              <table className="text-left font-medium">
+                <tbody>
+                  <tr><td className="pr-4 pb-1 text-gray-500 uppercase text-xs">Jadwal</td><td className="font-bold pb-1">: {pm.date}</td></tr>
+                  <tr><td className="pr-4 pb-1 text-gray-500 uppercase text-xs">Pengerjaan</td><td className="font-bold pb-1">: {pm.executeDate}</td></tr>
+                  <tr><td className="pr-4 pb-1 text-gray-500 uppercase text-xs">Jam</td><td className="font-bold pb-1">: {pm.pmStartTime || '-'} s/d {pm.pmEndTime || '-'}</td></tr>
+                  <tr><td className="pr-4 pt-2 text-gray-500 uppercase text-xs border-t border-gray-300">Status</td><td className="font-bold pt-2 uppercase">: {pm.status}</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* SOP Lists */}
+          <div className="mb-6 relative z-10">
+            <h5 className="font-bold text-gray-900 bg-gray-200 px-3 py-1 rounded text-sm uppercase tracking-wider inline-block mb-3 border border-gray-400">Daftar SOP Terselesaikan:</h5>
+            {tasks.length > 0 ? (
+              <ul className="space-y-1">
+                {tasks.map((t, idx) => (
+                  <li key={t.id} className="text-sm flex border-b border-gray-200 pb-2 mb-2 items-end">
+                    <span className="font-bold mr-3 text-gray-400">{idx+1}.</span> 
+                    <span className="flex-1 text-gray-800">{t.task}</span>
+                    <span className="font-black text-gray-900 bg-gray-100 px-2 py-0.5 rounded border border-gray-400"><i className="fa-regular fa-square-check mr-1"></i> DONE</span>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="text-sm italic p-4 border border-dashed rounded">Tidak ada daftar SOP.</p>}
+          </div>
+
+          {/* Catatan */}
+          <div className="mb-8 relative z-10">
+            <h5 className="font-bold text-gray-900 bg-gray-200 px-3 py-1 rounded text-sm uppercase tracking-wider inline-block mb-3 border border-gray-400">Catatan Kondisi Aktual:</h5>
+            <div className="bg-gray-50 p-4 border border-gray-400 min-h-[80px] text-sm italic font-medium rounded">{pm.executionNote || '-'}</div>
+          </div>
+
+          {/* Footer TTD QR */}
+          <div className="flex justify-between mt-8 pt-8 border-t-2 border-gray-900 relative z-10">
+            <div className="text-center w-56">
+              <p className="text-xs font-bold mb-2 uppercase text-gray-500">Teknisi Pelaksana</p>
+              <div className="h-32 w-32 mx-auto border p-1 bg-white rounded shadow-sm"><img src={qrTeknisi} alt="QR" className="w-full h-full" crossOrigin="anonymous" /></div>
+              <p className="font-black text-gray-900 uppercase text-sm mt-2 border-t pt-1">{pm.executedBy}</p>
+            </div>
+            <div className="text-center w-56">
+              <p className="text-xs font-bold mb-2 uppercase text-gray-500">Supervisor</p>
+              <div className="h-32 w-32 mx-auto border p-1 bg-white rounded shadow-sm">
+                {qrSupervisor ? <img src={qrSupervisor} alt="QR" className="w-full h-full" crossOrigin="anonymous" /> : <div className="text-[10px] text-red-400 pt-10 uppercase">Pending<br/>Verifikasi</div>}
+              </div>
+              <p className="font-black text-gray-900 uppercase text-sm mt-2 border-t pt-1">{pm.status === 'Terverifikasi' ? pm.verifiedBy : '...................'}</p>
+            </div>
+          </div>
+        </div>
+      );
+    }) : (
+      <div className="text-center p-16 border-4 border-dashed text-gray-500 rounded-xl">Arsip Kosong</div>
+    )}
+  </div>
+)}
 
         {/* HALAMAN CETAK: MUTASI SPAREPART */}
         {activeTab === 'sparepart' && (
