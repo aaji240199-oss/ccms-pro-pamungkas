@@ -1526,59 +1526,71 @@ export default function App() {
 )}
 
         {/* HALAMAN CETAK: MUTASI SPAREPART */}
-        {activeTab === 'sparepart' && (
-           <div className="bg-white p-8 rounded-xl print:p-0 border print:border-0 print:shadow-none shadow-sm">
-             <h1 className="text-2xl font-bold uppercase mb-4 text-center print:text-left border-b-2 border-gray-900 pb-2">Laporan Mutasi Sparepart</h1>
-             <div className="mb-4 text-sm font-bold text-gray-600 uppercase print:block hidden">
-                <p>Filter Area: {filterFactory}</p>
-                <p>Periode: {filterMonth ? `Bulan ${filterMonth}` : (filterYear ? `Tahun ${filterYear}` : 'Semua Waktu')}</p>
-             </div>
-             
-             <table className="w-full border-collapse border border-gray-900 text-sm mt-4">
-               <thead>
-                 <tr className="bg-gray-200">
-                   <th className="border border-gray-900 p-2 w-32">Waktu Transaksi</th>
-                   <th className="border border-gray-900 p-2">Item Sparepart</th>
-                   <th className="border border-gray-900 p-2 text-center w-24">Tipe</th>
-                   <th className="border border-gray-900 p-2 text-center w-24">Qty Mutasi</th>
-                   <th className="border border-gray-900 p-2">Keterangan / Tujuan</th>
-                   <th className="border border-gray-900 p-2 text-center">User/PIC</th>
-                 </tr>
-               </thead>
-               <tbody>
-                 {filteredSparepartLogs.length > 0 ? filteredSparepartLogs.slice().reverse().map(log => (
-                   <tr key={log.id} className="hover:bg-gray-50 print:hover:bg-transparent">
-                     <td className="border border-gray-900 p-2 text-xs">{log.date}</td>
-                     <td className="border border-gray-900 p-2">
-                       <span className="font-bold block">{log.partName}</span>
-                       <span className="text-[10px] uppercase text-gray-500">{log.partCode} | {log.factory}</span>
-                     </td>
-                     <td className="border border-gray-900 p-2 text-center font-bold">
-                        {log.type === 'IN' ? <span className="text-green-700">IN (Masuk)</span> : <span className="text-red-700">OUT (Keluar)</span>}
-                     </td>
-                     <td className={`border border-gray-900 p-2 text-center font-black ${log.type === 'IN' ? 'text-green-700' : 'text-red-700'}`}>
-                        {log.type === 'IN' ? '+' : '-'}{log.qty} <span className="text-xs font-normal text-gray-600">{log.unit}</span>
-                     </td>
-                     <td className="border border-gray-900 p-2 text-xs italic">{log.remarks}</td>
-                     <td className="border border-gray-900 p-2 text-center text-xs font-medium">{log.user}</td>
-                   </tr>
-                 )) : (
-                   <tr><td colSpan="6" className="border border-gray-900 p-8 text-center text-gray-500 font-bold">Data transaksi sparepart tidak ditemukan sesuai filter.</td></tr>
-                 )}
-               </tbody>
-             </table>
-             
-             <div className="hidden print:flex justify-end mt-16 text-center text-sm font-bold uppercase">
-               <div className="w-56">
-                 <p className="mb-20">Admin / Gudang Sparepart</p>
-                 <p className="border-t-2 border-gray-900 pt-2">( ........................................ )</p>
-               </div>
-             </div>
-           </div>
-        )}
+{activeTab === 'sparepart' && (
+  <div className="bg-white p-8 rounded-xl print:p-0 border print:border-0 shadow-sm print:shadow-none">
+    
+    {/* HEADER DOKUMEN RESMI */}
+    <div className="flex items-center justify-between border-b-4 border-gray-900 pb-6 mb-8 print:flex">
+      <div>
+        <h1 className="text-3xl font-black uppercase text-gray-900">Laporan Mutasi Sparepart</h1>
+        <p className="text-sm font-bold text-gray-500 uppercase tracking-widest mt-1">Sistem Manajemen Inventori - {filterFactory}</p>
       </div>
-    );
-  };
+      <div className="text-right">
+        <p className="text-xs font-bold text-gray-400">PERIODE LAPORAN</p>
+        <p className="text-lg font-black text-gray-900">{filterMonth || filterYear || 'Semua Waktu'}</p>
+      </div>
+    </div>
+
+    {/* TABEL MUTASI */}
+    <table className="w-full border-collapse border border-gray-900 text-sm">
+      <thead>
+        <tr className="bg-gray-900 text-white">
+          <th className="border border-gray-900 p-3">Tanggal</th>
+          <th className="border border-gray-900 p-3">Nama Sparepart</th>
+          <th className="border border-gray-900 p-3 text-center">Tipe</th>
+          <th className="border border-gray-900 p-3 text-center">Qty</th>
+          <th className="border border-gray-900 p-3 text-left">Keterangan</th>
+          <th className="border border-gray-900 p-3">PIC</th>
+        </tr>
+      </thead>
+      <tbody>
+        {filteredSparepartLogs.length > 0 ? filteredSparepartLogs.slice().reverse().map(log => (
+          <tr key={log.id} className="hover:bg-gray-50">
+            <td className="border border-gray-900 p-2 text-center text-xs font-medium">{log.date}</td>
+            <td className="border border-gray-900 p-2">
+              <span className="font-bold text-gray-900">{log.partName}</span>
+              <span className="text-[10px] text-gray-500 block">Code: {log.partCode}</span>
+            </td>
+            <td className="border border-gray-900 p-2 text-center">
+               <span className={`px-2 py-1 rounded font-black text-[10px] uppercase ${log.type === 'IN' ? 'bg-green-100 text-green-800 border border-green-300' : 'bg-red-100 text-red-800 border border-red-300'}`}>
+                 {log.type === 'IN' ? 'Masuk' : 'Keluar'}
+               </span>
+            </td>
+            <td className={`border border-gray-900 p-2 text-center font-black ${log.type === 'IN' ? 'text-green-700' : 'text-red-700'}`}>
+               {log.type === 'IN' ? '+' : '-'}{log.qty} <span className="text-[10px] font-normal">{log.unit}</span>
+            </td>
+            <td className="border border-gray-900 p-2 text-xs italic">{log.remarks}</td>
+            <td className="border border-gray-900 p-2 text-center text-xs font-bold">{log.user}</td>
+          </tr>
+        )) : (
+          <tr><td colSpan="6" className="border border-gray-900 p-10 text-center font-bold text-gray-400">Data Transaksi Kosong</td></tr>
+        )}
+      </tbody>
+    </table>
+
+    {/* FOOTER TTD */}
+    <div className="flex justify-between mt-12 pt-4">
+      <div className="text-center w-48">
+        <p className="text-[10px] font-bold uppercase text-gray-500 mb-16">Dibuat Oleh (Admin/SPV)</p>
+        <p className="border-t border-gray-900 pt-1 font-bold text-sm">____________________</p>
+      </div>
+      <div className="text-center w-48">
+        <p className="text-[10px] font-bold uppercase text-gray-500 mb-16">Disetujui (Dir. Manufaktur)</p>
+        <p className="border-t border-gray-900 pt-1 font-bold text-sm">____________________</p>
+      </div>
+    </div>
+  </div>
+)}
 
   const NavItem = ({ id, icon, label, roles }) => {
     if (!roles.includes(currentUser.role)) return null;
