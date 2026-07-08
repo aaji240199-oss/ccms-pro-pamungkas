@@ -27,6 +27,11 @@ export default function App() {
   const [activeMenu, setActiveMenu] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [dialog, setDialog] = useState(null);
+  
+  // States Baru: Notifikasi & Scanner
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [showScanner, setShowScanner] = useState(false);
 
   // --- STATES: DATABASE ---
   const [factories, setFactories] = useState([]);
@@ -38,8 +43,6 @@ export default function App() {
   const [pmSchedules, setPmSchedules] = useState([]);
   const [pmParams, setPmParams] = useState([]);
   const [dailyActivities, setDailyActivities] = useState([]);
-  
-  // --- STATES: SPAREPART ---
   const [spareparts, setSpareparts] = useState([]);
   const [sparepartLogs, setSparepartLogs] = useState([]);
   const [sparepartRequests, setSparepartRequests] = useState([]);
@@ -98,6 +101,40 @@ export default function App() {
     };
   }, [fbUser]);
 
+  // --- EFFECT: GENERATOR NOTIFIKASI ---
+  useEffect(() => {
+    if (!currentUser) return;
+    let notifs = [];
+    const availableMachines = machines.filter(m => currentUser.factory === 'All' || m.factory === currentUser.factory);
+
+    if (['admin', 'teknisi'].includes(currentUser.role)) {
+      const openBrk = breakdowns.filter(b => b.status === 'Open' && availableMachines.find(m => m.id === b.machineId));
+      openBrk.forEach(b => {
+         notifs.push({ id: b.id, title: 'Breakdown Baru', text: b.description, type: 'alert', action: currentUser.role === 'admin' ? 'dashboard' : 'penanganan_rusak' });
+      });
+    }
+    if (currentUser.role === 'admin') {
+      const reqParts = sparepartRequests.filter(r => r.status === 'Pending');
+      reqParts.forEach(r => {
+         notifs.push({ id: r.id, title: 'Request Part', text: `${r.requestedBy} meminta ${r.partName}`, type: 'warning', action: 'kelola_sparepart' });
+      });
+    }
+    if (currentUser.role === 'teknisi') {
+      const pendingPM = pmSchedules.filter(s => s.status === 'Pending' && availableMachines.find(m => m.id === s.machineId));
+      pendingPM.forEach(p => {
+         notifs.push({ id: p.id, title: 'Jadwal PM Baru', text: p.title, type: 'info', action: 'eksekusi_pm' });
+      });
+    }
+    if (currentUser.role === 'user') {
+      const mySolved = breakdowns.filter(b => b.reportedBy === currentUser.name && b.status === 'Selesai Diperbaiki');
+      mySolved.forEach(b => {
+         notifs.push({ id: b.id, title: 'Mesin Selesai', text: `Perbaikan mesin telah selesai.`, type: 'success', action: 'req_perbaikan' });
+      });
+    }
+    setNotifications(notifs.slice(0, 8)); // Ambil maks 8 notif
+  }, [breakdowns, sparepartRequests, pmSchedules, currentUser, machines]);
+
+
   // --- HELPER FUNCTIONS ---
   const showMessage = (title, message, type = 'info') => setDialog({ title, message, type, onConfirm: null });
   const showConfirm = (title, message, onConfirm) => setDialog({ title, message, type: 'confirm', onConfirm });
@@ -127,7 +164,6 @@ export default function App() {
     if (foundUser) {
       setCurrentUser(foundUser);
       setActiveMenu('dashboard');
-      // Otomatis tutup sidebar di mobile saat login
       if(window.innerWidth < 768) setIsSidebarOpen(false);
     } else {
       showMessage('Gagal Login', 'Username atau password salah!', 'error');
@@ -156,6 +192,37 @@ export default function App() {
             </button>
           </div>
         </div>
+      </div>
+    );
+  };
+
+  // Komponen Simulasi Scanner
+  const SimulatedQRScanner = ({ onScanSuccess, onClose }) => {
+    const availableMachines = getAvailableMachines();
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-75 z-[100] flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col">
+          <div className="bg-gray-900 text-white p-4 flex justify-between items-center">
+             <h3 className="font-bold"><i className="fa-solid fa-camera mr-2"></i> Simulasi Scanner QR</h3>
+             <button onClick={onClose} className="text-gray-400 hover:text-white"><i className="fa-solid fa-xmark text-xl"></i></button>
+          </div>
+          <div className="p-6 text-center bg-gray-100 flex-1 flex flex-col justify-center items-center">
+             <div className="w-48 h-48 border-4 border-dashed border-blue-400 relative mb-4 bg-gray-200 flex items-center justify-center">
+                <div className="absolute w-full h-1 bg-red-500 shadow-[0_0_10px_red] animate-[scan_2s_ease-in-out_infinite]"></div>
+                <i className="fa-solid fa-qrcode text-6xl text-gray-400 opacity-50"></i>
+             </div>
+             <p className="text-sm text-gray-500 italic mb-4">Arahkan kamera ke QR Code mesin. (Pilih tombol di bawah untuk simulasi scan)</p>
+          </div>
+          <div className="p-4 bg-white border-t space-y-2 max-h-48 overflow-y-auto">
+             <p className="text-xs font-bold text-gray-500 uppercase mb-2">Simulasi Deteksi QR:</p>
+             {availableMachines.length > 0 ? availableMachines.map(m => (
+                <button key={m.id} onClick={() => onScanSuccess(m.code)} className="w-full text-left p-2 border rounded hover:bg-blue-50 text-sm font-medium">
+                  {m.code} - {m.name}
+                </button>
+             )) : <p className="text-sm text-gray-400 italic">Belum ada mesin.</p>}
+          </div>
+        </div>
+        <style>{`@keyframes scan { 0% { top: 0; } 50% { top: 100%; } 100% { top: 0; } }`}</style>
       </div>
     );
   };
@@ -200,41 +267,89 @@ export default function App() {
     const availableMachines = getAvailableMachines();
     const openBreakdowns = breakdowns.filter(b => b.status === 'Open' && availableMachines.find(m => m.id === b.machineId));
     const resolvedBreakdowns = breakdowns.filter(b => b.status === 'Selesai Diperbaiki' && availableMachines.find(m => m.id === b.machineId));
+    const pendingPMs = pmSchedules.filter(s => s.status === 'Pending' && availableMachines.find(m => m.id === s.machineId));
     
+    // Logic untuk Grafik Visual Sederhana (HTML/CSS)
+    const machineErrorCounts = {};
+    breakdowns.filter(b => availableMachines.find(m => m.id === b.machineId)).forEach(b => {
+       const mName = machines.find(m => m.id === b.machineId)?.name || 'Unknown';
+       machineErrorCounts[mName] = (machineErrorCounts[mName] || 0) + 1;
+    });
+    
+    const sortedBadActors = Object.keys(machineErrorCounts)
+       .map(key => ({ name: key, jumlah: machineErrorCounts[key] }))
+       .sort((a, b) => b.jumlah - a.jumlah)
+       .slice(0, 5); // Ambil 5 Teratas
+       
+    const maxErrors = sortedBadActors.length > 0 ? sortedBadActors[0].jumlah : 1;
+    const totalMesin = availableMachines.length;
+    const mesinRusak = new Set(openBreakdowns.map(b => b.machineId)).size;
+    const persentaseSehat = totalMesin === 0 ? 100 : Math.round(((totalMesin - mesinRusak) / totalMesin) * 100);
+
     return (
       <div className="space-y-6">
         <h2 className="text-2xl font-bold text-gray-800">Dashboard Utama</h2>
+        
+        {/* Metric Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-          <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-500 flex items-center hover:shadow-md transition-shadow">
+          <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-500 flex items-center">
             <div className="bg-blue-100 p-3 rounded-full mr-4"><i className="fa-solid fa-industry text-blue-600 text-xl w-6 text-center"></i></div>
-            <div>
-              <p className="text-sm text-gray-500 font-medium">Total Mesin</p>
-              <p className="text-2xl font-bold text-gray-800">{availableMachines.length}</p>
-            </div>
+            <div><p className="text-sm text-gray-500 font-medium">Total Mesin</p><p className="text-2xl font-bold text-gray-800">{availableMachines.length}</p></div>
           </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-red-500 flex items-center hover:shadow-md transition-shadow">
+          <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-red-500 flex items-center">
             <div className="bg-red-100 p-3 rounded-full mr-4"><i className="fa-solid fa-triangle-exclamation text-red-600 text-xl w-6 text-center"></i></div>
-            <div>
-              <p className="text-sm text-gray-500 font-medium">Request Pending</p>
-              <p className="text-2xl font-bold text-gray-800">{openBreakdowns.length}</p>
-            </div>
+            <div><p className="text-sm text-gray-500 font-medium">Request Pending</p><p className="text-2xl font-bold text-gray-800">{openBreakdowns.length}</p></div>
           </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-indigo-500 flex items-center hover:shadow-md transition-shadow">
+          <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-indigo-500 flex items-center">
             <div className="bg-indigo-100 p-3 rounded-full mr-4"><i className="fa-solid fa-wrench text-indigo-600 text-xl w-6 text-center"></i></div>
-            <div>
-              <p className="text-sm text-gray-500 font-medium">Mesin Diperbaiki</p>
-              <p className="text-2xl font-bold text-gray-800">{resolvedBreakdowns.length}</p>
-            </div>
+            <div><p className="text-sm text-gray-500 font-medium">Mesin Diperbaiki</p><p className="text-2xl font-bold text-gray-800">{resolvedBreakdowns.length}</p></div>
           </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-green-500 flex items-center hover:shadow-md transition-shadow">
+          <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-green-500 flex items-center">
             <div className="bg-green-100 p-3 rounded-full mr-4"><i className="fa-solid fa-calendar-check text-green-600 text-xl w-6 text-center"></i></div>
-            <div>
-              <p className="text-sm text-gray-500 font-medium">Jadwal PM</p>
-              <p className="text-2xl font-bold text-gray-800">{pmSchedules.filter(s => availableMachines.find(m => m.id === s.machineId)).length}</p>
-            </div>
+            <div><p className="text-sm text-gray-500 font-medium">Jadwal PM</p><p className="text-2xl font-bold text-gray-800">{pendingPMs.length}</p></div>
           </div>
         </div>
         
+        {/* Area Charts HTML CSS */}
+        {['admin', 'teknisi'].includes(currentUser.role) && (
+           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 lg:col-span-1">
+                 <h3 className="font-bold text-gray-800 mb-6 border-b pb-2">Status Kesediaan Mesin</h3>
+                 <div className="flex flex-col items-center justify-center">
+                    <div className="relative w-40 h-40 rounded-full flex items-center justify-center bg-gray-100 shadow-inner" style={{ background: `conic-gradient(#22c55e ${persentaseSehat}%, #ef4444 0)` }}>
+                       <div className="w-32 h-32 bg-white rounded-full flex flex-col items-center justify-center absolute">
+                          <span className="text-3xl font-black text-gray-800">{persentaseSehat}%</span>
+                          <span className="text-xs text-gray-500 font-bold uppercase mt-1">Normal</span>
+                       </div>
+                    </div>
+                    <div className="mt-6 flex justify-center gap-6 w-full px-4">
+                       <div className="text-center"><div className="w-3 h-3 bg-green-500 rounded-full inline-block mr-2"></div><span className="text-sm font-bold text-gray-700">Sehat ({totalMesin - mesinRusak})</span></div>
+                       <div className="text-center"><div className="w-3 h-3 bg-red-500 rounded-full inline-block mr-2"></div><span className="text-sm font-bold text-gray-700">Rusak ({mesinRusak})</span></div>
+                    </div>
+                 </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 lg:col-span-2">
+                 <h3 className="font-bold text-gray-800 mb-4 border-b pb-2">Top 5 Mesin Sering Rusak</h3>
+                 <div className="space-y-4 pt-2">
+                    {sortedBadActors.length > 0 ? sortedBadActors.map((item, idx) => (
+                       <div key={idx}>
+                          <div className="flex justify-between text-xs font-bold text-gray-700 mb-1">
+                             <span>{item.name}</span>
+                             <span>{item.jumlah} Kali</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-3">
+                             <div className="bg-blue-500 h-3 rounded-full transition-all duration-1000" style={{ width: `${(item.jumlah / maxErrors) * 100}%` }}></div>
+                          </div>
+                       </div>
+                    )) : (
+                       <p className="text-center text-gray-400 italic py-8">Belum ada data kerusakan mesin.</p>
+                    )}
+                 </div>
+              </div>
+           </div>
+        )}
+
         <div className="bg-gradient-to-r from-blue-50 to-white p-5 md:p-6 rounded-xl shadow-sm mb-6 border border-blue-100">
           <h3 className="text-lg font-semibold mb-1 text-blue-900">Selamat Datang, {currentUser.name}</h3>
           <p className="text-gray-600 text-sm">Anda login sebagai <strong>{currentUser.role.toUpperCase()}</strong>. Lingkup operasional: <span className="bg-blue-200 text-blue-800 px-2 py-0.5 rounded font-bold">{currentUser.factory}</span>.</p>
@@ -242,7 +357,7 @@ export default function App() {
 
         {currentUser.role === 'admin' && (
           <div className="space-y-6">
-            <h3 className="text-xl font-bold text-gray-800 border-b pb-2"><i className="fa-solid fa-desktop mr-2 text-gray-500"></i> Panel Monitoring</h3>
+            <h3 className="text-xl font-bold text-gray-800 border-b pb-2"><i className="fa-solid fa-desktop mr-2 text-gray-500"></i> Panel Monitoring Admin</h3>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               
               <div className="bg-white p-5 rounded-xl shadow-sm border border-red-100">
@@ -292,35 +407,6 @@ export default function App() {
                 </div>
               </div>
             </div>
-            
-            <div className="bg-white p-5 rounded-xl shadow-sm border border-blue-100">
-              <h4 className="font-bold text-blue-700 mb-4 flex items-center"><i className="fa-solid fa-list-check mr-2"></i> Daily Activity Teknisi</h4>
-              <div className="overflow-x-auto rounded-lg border border-blue-200">
-                <table className="w-full text-sm border-collapse min-w-[600px]">
-                  <thead>
-                    <tr className="bg-blue-100 text-left">
-                      <th className="p-3 font-semibold text-blue-900">Tanggal</th>
-                      <th className="p-3 font-semibold text-blue-900">Teknisi</th>
-                      <th className="p-3 font-semibold text-blue-900">Pabrik</th>
-                      <th className="p-3 font-semibold text-blue-900">Aktivitas</th>
-                      <th className="p-3 font-semibold text-blue-900">Waktu</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white">
-                    {dailyActivities.slice().reverse().map(act => (
-                      <tr key={act.id} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="p-3 whitespace-nowrap text-gray-600">{act.date}</td>
-                        <td className="p-3 font-semibold text-gray-800">{act.teknisi}</td>
-                        <td className="p-3"><span className="text-[10px] uppercase font-bold bg-gray-200 text-gray-700 px-2 py-1 rounded">{act.factory}</span></td>
-                        <td className="p-3 text-gray-700">{act.activity}</td>
-                        <td className="p-3 whitespace-nowrap text-gray-500 font-medium">{act.startTime} - {act.endTime}</td>
-                      </tr>
-                    ))}
-                    {dailyActivities.length === 0 && <tr><td colSpan="5" className="p-8 text-center text-gray-500 italic">Belum ada aktivitas.</td></tr>}
-                  </tbody>
-                </table>
-              </div>
-            </div>
           </div>
         )}
       </div>
@@ -328,7 +414,7 @@ export default function App() {
   };
 
   const AdminKelolaPabrik = () => {
-    // ... (Fungsi tetap sama, pastikan ada overflow-x-auto di tabel jika ada) ...
+    // ... (Fungsi tetap sama) ...
     const [newFactory, setNewFactory] = useState('');
     const [editId, setEditId] = useState(null);
     const [editName, setEditName] = useState('');
@@ -390,6 +476,7 @@ export default function App() {
   };
 
   const AdminKelolaUser = () => {
+    // ... (Fungsi tetap sama) ...
     const defaultFactory = factories[0]?.name || '';
     const [formData, setFormData] = useState({ id: null, username: '', password: '', role: 'user', name: '', factory: defaultFactory });
     const [isEditing, setIsEditing] = useState(false);
@@ -489,6 +576,7 @@ export default function App() {
   };
 
   const AdminKelolaMesin = () => {
+    // ... (Fungsi tetap sama) ...
     const defaultFactory = factories[0]?.name || '';
     const [newMachine, setNewMachine] = useState({ code: '', name: '', location: '', factory: defaultFactory });
     const [selectedMachineParams, setSelectedMachineParams] = useState(null);
@@ -534,7 +622,7 @@ export default function App() {
             <form onSubmit={handleAddMachine} className="space-y-3 bg-gray-50 p-4 rounded-lg border border-gray-100">
               <div className="flex flex-col sm:flex-row gap-3">
                 <div className="sm:w-1/3">
-                  <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Kode Mesin</label>
+                  <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Kode Mesin (U/ Barcode)</label>
                   <input type="text" required className="w-full border p-2 rounded" value={newMachine.code} onChange={e => setNewMachine({...newMachine, code: e.target.value})} />
                 </div>
                 <div className="flex-1">
@@ -611,6 +699,7 @@ export default function App() {
   };
 
   const AdminKelolaSparepart = () => {
+    // ... (Fungsi tetap sama) ...
     const defaultFactory = factories[0]?.name || '';
     const [spForm, setSpForm] = useState({ code: '', name: '', factory: defaultFactory, stock: '', unit: 'pcs' });
     const [activeTab, setActiveTab] = useState('stok'); 
@@ -792,6 +881,7 @@ export default function App() {
   };
 
   const SetupPM = () => {
+    // ... (Fungsi tetap sama) ...
     const [newSchedule, setNewSchedule] = useState({ machineId: '', date: '', title: '' });
     const [selectedSchedule, setSelectedSchedule] = useState(null);
     const [tempTasks, setTempTasks] = useState([]);
@@ -921,7 +1011,7 @@ export default function App() {
   };
 
   const EksekusiPM = () => {
-    // ... (Fungsi tetap sama, pastikan padding dan margin disesuaikan md:p-6 dll) ...
+    // ... (Fungsi tetap sama) ...
     const pendingSchedules = pmSchedules.filter(s => s.status === 'Pending' && getAvailableMachines().find(m => m.id === s.machineId));
     const [pmForms, setPmForms] = useState({});
 
@@ -1133,6 +1223,7 @@ export default function App() {
   };
 
   const TeknisiDailyActivity = () => {
+    // ... (Fungsi tetap sama) ...
     const [formData, setFormData] = useState({ date: new Date().toISOString().split('T')[0], startTime: '', endTime: '', activity: '' });
     const handleSubmit = async (e) => {
       e.preventDefault();
@@ -1194,11 +1285,31 @@ export default function App() {
       setCheckData({});
     };
 
+    const handleQRSuccess = (code) => {
+       const m = availableMachines.find(x => x.code === code);
+       if (m) {
+          setSelectedMachine(m.id);
+          setCheckData({});
+          setShowScanner(false);
+          showMessage('Scan Sukses', `Mesin terpilih: ${m.name}`, 'success');
+       } else {
+          showMessage('Scan Gagal', `Mesin dengan kode ${code} tidak ditemukan.`, 'error');
+       }
+    };
+
     return (
       <div className="space-y-6">
-        <h2 className="text-2xl font-bold text-gray-800">Form Checklist Harian</h2>
+        {showScanner && <SimulatedQRScanner onScanSuccess={handleQRSuccess} onClose={() => setShowScanner(false)} />}
+        
+        <div className="flex justify-between items-center">
+           <h2 className="text-2xl font-bold text-gray-800">Form Checklist Harian</h2>
+           <button onClick={() => setShowScanner(true)} className="bg-gray-800 hover:bg-black text-white px-4 py-2 rounded shadow-md text-sm font-bold flex items-center">
+              <i className="fa-solid fa-qrcode mr-2"></i> Scan QR Aset
+           </button>
+        </div>
+
         <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-100">
-          <h3 className="text-xs font-bold text-gray-500 uppercase mb-4 border-b pb-2">1. Pilih Mesin</h3>
+          <h3 className="text-xs font-bold text-gray-500 uppercase mb-4 border-b pb-2">1. Pilih Mesin Manual</h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 md:gap-4">
             {availableMachines.map(m => (
               <div key={m.id} onClick={() => { setSelectedMachine(m.id); setCheckData({}); }} className={`cursor-pointer border-2 p-4 rounded-xl flex flex-col items-center text-center transition-all ${selectedMachine === m.id ? 'bg-blue-600 border-blue-600 shadow-lg scale-105' : 'bg-white hover:border-blue-300'}`}>
@@ -1244,7 +1355,7 @@ export default function App() {
   };
 
   const TeknisiSparepart = () => {
-    // ... (Sama persis dengan kode sebelumnya, pastikan input form 100% width)
+    // ... (Fungsi tetap sama) ...
     const [activeTab, setActiveTab] = useState('ambil');
     const availableParts = spareparts.filter(sp => sp.factory === currentUser.factory);
     const [useForm, setUseForm] = useState({ partId: '', qty: '', remarks: '' });
@@ -1364,6 +1475,7 @@ export default function App() {
   };
 
   const CetakLaporan = () => {
+    // ... (Fungsi tetap sama) ...
     const [activeTab, setActiveTab] = useState('harian');
     const [filterFactory, setFilterFactory] = useState('All');
     const [filterMachine, setFilterMachine] = useState('');
@@ -1449,7 +1561,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* --- HALAMAN CETAK: HARIAN (DESAIN BARU KOMPAK & MENARIK) --- */}
         {activeTab === 'harian' && (
           <div className="bg-white p-4 md:p-8 rounded-xl print:p-0 border print:border-0 print:shadow-none shadow-sm">
             <div className="hidden print:flex items-center justify-between border-b-4 border-gray-900 pb-4 mb-4">
@@ -1482,7 +1593,6 @@ export default function App() {
                 <tbody>
                   {filteredChecks.length > 0 ? filteredChecks.map(check => {
                      const machine = machines.find(m => m.id === check.machineId);
-                     // Format tanggal rapi
                      const tglParts = check.date.split('-');
                      const tglTampil = tglParts.length === 3 ? `${tglParts[2]}/${tglParts[1]}` : check.date;
                      
@@ -1527,7 +1637,6 @@ export default function App() {
           </div>
         )}
 
-        {/* --- HALAMAN CETAK: PREVENTIVE MAINTENANCE --- */}
         {activeTab === 'pm' && (
           <div className="space-y-12">
             {filteredPMs.length > 0 ? filteredPMs.map(pm => {
@@ -1610,7 +1719,6 @@ export default function App() {
           </div>
         )}
 
-        {/* --- HALAMAN CETAK: MUTASI SPAREPART --- */}
         {activeTab === 'sparepart' && (
           <div className="bg-white p-4 md:p-8 rounded-xl print:p-0 border print:border-0 shadow-sm print:shadow-none">
             <div className="flex items-center justify-between border-b-4 border-gray-900 pb-6 mb-8 print:flex hidden">
@@ -1681,7 +1789,7 @@ export default function App() {
   const NavItem = ({ id, icon, label, roles }) => {
     if (!roles.includes(currentUser.role)) return null;
     return (
-      <button onClick={() => {setActiveMenu(id); setIsSidebarOpen(false)}} className={`w-full flex items-center px-4 py-3 rounded-lg text-left font-medium text-sm ${activeMenu === id ? 'bg-blue-600 text-white' : 'text-blue-100 hover:bg-blue-800'}`}>
+      <button onClick={() => {setActiveMenu(id); setIsSidebarOpen(false)}} className={`w-full flex items-center px-4 py-3 rounded-lg text-left font-medium text-sm ${activeMenu === id ? 'bg-blue-600 text-white shadow' : 'text-blue-100 hover:bg-blue-800'}`}>
         <i className={`fa-solid ${icon} w-6 mr-3 text-lg`}></i> <span>{label}</span>
       </button>
     );
@@ -1710,7 +1818,7 @@ export default function App() {
           <nav className="space-y-1">
             <NavItem id="dashboard" icon="fa-chart-pie" label="Dashboard" roles={['admin', 'teknisi', 'user']} />
             <div className={currentUser.role === 'admin' ? 'pt-4 pb-2' : 'hidden'}>
-              <p className="text-[10px] font-bold text-gray-500 uppercase px-4 mb-2">Manajemen Admin</p>
+              <p className="text-[10px] font-bold text-gray-500 uppercase px-4 mb-2 mt-2">Manajemen Admin</p>
               <NavItem id="kelola_pabrik" icon="fa-city" label="Master Pabrik / Lokasi" roles={['admin']} />
               <NavItem id="kelola_user" icon="fa-users-gear" label="Manajemen Akun" roles={['admin']} />
               <NavItem id="kelola_mesin" icon="fa-network-wired" label="Aset & Parameter" roles={['admin']} />
@@ -1719,7 +1827,7 @@ export default function App() {
               <NavItem id="cetak" icon="fa-print" label="Pusat Dokumen (Cetak)" roles={['admin']} />
             </div>
             <div className={currentUser.role === 'teknisi' ? 'pt-4 pb-2' : 'hidden'}>
-              <p className="text-[10px] font-bold text-gray-500 uppercase px-4 mb-2">Tugas Teknisi</p>
+              <p className="text-[10px] font-bold text-gray-500 uppercase px-4 mb-2 mt-2">Tugas Teknisi</p>
               <NavItem id="daily_activity" icon="fa-book-open" label="Buku Jurnal Harian" roles={['teknisi']} />
               <NavItem id="cek_harian" icon="fa-clipboard-list" label="Checklist Rutin Mesin" roles={['teknisi']} />
               <NavItem id="penanganan_rusak" icon="fa-screwdriver-wrench" label="Tangani Breakdown" roles={['teknisi']} />
@@ -1731,27 +1839,76 @@ export default function App() {
             </div>
           </nav>
         </div>
-        <div className="absolute bottom-0 w-full p-4 bg-gray-950 shrink-0"><button onClick={handleLogout} className="bg-red-600 text-white w-full p-3 rounded font-bold"><i className="fa-solid fa-power-off mr-2"></i> KELUAR</button></div>
+        <div className="absolute bottom-0 w-full p-4 bg-gray-950 shrink-0"><button onClick={handleLogout} className="bg-red-600 text-white w-full p-3 rounded font-bold hover:bg-red-700 transition-colors"><i className="fa-solid fa-power-off mr-2"></i> KELUAR</button></div>
       </aside>
+      
       <main className="flex-1 flex flex-col bg-gray-50 overflow-hidden relative">
-        <header className="print:hidden bg-white shadow-sm border-b h-16 flex items-center px-4 md:px-8 z-10 shrink-0">
-          <button className="md:hidden mr-4 text-gray-600 hover:text-black" onClick={() => setIsSidebarOpen(true)}><i className="fa-solid fa-bars-staggered text-lg"></i></button>
-          <h2 className="text-lg font-black uppercase text-gray-800 tracking-widest truncate">{activeMenu.replace('_', ' ')}</h2>
+        <header className="print:hidden bg-white shadow-sm border-b h-16 flex items-center justify-between px-4 md:px-6 z-10 shrink-0">
+          <div className="flex items-center">
+             <button className="md:hidden mr-4 text-gray-600 hover:text-black" onClick={() => setIsSidebarOpen(true)}><i className="fa-solid fa-bars-staggered text-lg"></i></button>
+             <h2 className="text-lg font-black uppercase text-gray-800 tracking-widest truncate">{activeMenu.replace('_', ' ')}</h2>
+          </div>
+
+          {/* Ikon Lonceng Notifikasi */}
+          <div className="relative">
+             <button onClick={() => setIsNotifOpen(!isNotifOpen)} className="text-gray-600 hover:text-blue-600 transition-colors p-2 relative">
+                <i className="fa-solid fa-bell text-xl"></i>
+                {notifications.length > 0 && (
+                   <span className="absolute top-1 right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-white shadow-sm animate-bounce">
+                      {notifications.length}
+                   </span>
+                )}
+             </button>
+
+             {/* Dropdown Notifikasi */}
+             {isNotifOpen && (
+                <div className="absolute right-0 mt-2 w-72 md:w-80 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 overflow-hidden transform origin-top-right transition-all">
+                   <div className="bg-gray-900 text-white p-3 font-bold flex justify-between items-center">
+                      <span>Notifikasi Sistem</span>
+                      <span className="text-[10px] bg-gray-700 px-2 py-1 rounded-full">{notifications.length} Baru</span>
+                   </div>
+                   <div className="max-h-80 overflow-y-auto">
+                      {notifications.length > 0 ? notifications.map((n, idx) => (
+                         <div key={idx} onClick={() => { setActiveMenu(n.action); setIsNotifOpen(false); }} className="p-3 border-b border-gray-100 hover:bg-blue-50 cursor-pointer flex gap-3 items-start transition-colors">
+                            <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white ${n.type==='alert'?'bg-red-500':n.type==='warning'?'bg-orange-500':n.type==='success'?'bg-green-500':'bg-blue-500'}`}>
+                               <i className={`fa-solid ${n.type==='alert'?'fa-triangle-exclamation':n.type==='warning'?'fa-box':n.type==='success'?'fa-check':'fa-info'}`}></i>
+                            </div>
+                            <div>
+                               <p className="text-xs font-bold text-gray-900">{n.title}</p>
+                               <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{n.text}</p>
+                            </div>
+                         </div>
+                      )) : (
+                         <div className="p-6 text-center text-gray-400">
+                            <i className="fa-regular fa-bell-slash text-3xl mb-2"></i>
+                            <p className="text-sm">Tidak ada notifikasi baru.</p>
+                         </div>
+                      )}
+                   </div>
+                </div>
+             )}
+          </div>
         </header>
-        <div className="flex-1 overflow-auto p-4 md:p-8 print:p-0 print:overflow-visible pb-20 md:pb-8">
-          {activeMenu === 'dashboard' && <Dashboard />}
-          {activeMenu === 'kelola_pabrik' && <AdminKelolaPabrik />}
-          {activeMenu === 'kelola_user' && <AdminKelolaUser />}
-          {activeMenu === 'kelola_mesin' && <AdminKelolaMesin />}
-          {activeMenu === 'kelola_sparepart' && <AdminKelolaSparepart />}
-          {activeMenu === 'setup_pm' && <SetupPM />}
-          {activeMenu === 'cetak' && <CetakLaporan />}
-          {activeMenu === 'daily_activity' && <TeknisiDailyActivity />}
-          {activeMenu === 'cek_harian' && <CekHarian />}
-          {activeMenu === 'penanganan_rusak' && <PenangananKerusakan />}
-          {activeMenu === 'eksekusi_pm' && <EksekusiPM />}
-          {activeMenu === 'teknisi_sparepart' && <TeknisiSparepart />}
-          {activeMenu === 'req_perbaikan' && <UserRequestPerbaikan />}
+        
+        <div className="flex-1 overflow-auto p-4 md:p-8 print:p-0 print:overflow-visible pb-20 md:pb-8 relative">
+          {/* Overlay untuk menutup notif saat klik di luar area */}
+          {isNotifOpen && <div className="absolute inset-0 z-40 bg-transparent" onClick={() => setIsNotifOpen(false)}></div>}
+          
+          <div className="relative z-0">
+             {activeMenu === 'dashboard' && <Dashboard />}
+             {activeMenu === 'kelola_pabrik' && <AdminKelolaPabrik />}
+             {activeMenu === 'kelola_user' && <AdminKelolaUser />}
+             {activeMenu === 'kelola_mesin' && <AdminKelolaMesin />}
+             {activeMenu === 'kelola_sparepart' && <AdminKelolaSparepart />}
+             {activeMenu === 'setup_pm' && <SetupPM />}
+             {activeMenu === 'cetak' && <CetakLaporan />}
+             {activeMenu === 'daily_activity' && <TeknisiDailyActivity />}
+             {activeMenu === 'cek_harian' && <CekHarian />}
+             {activeMenu === 'penanganan_rusak' && <PenangananKerusakan />}
+             {activeMenu === 'eksekusi_pm' && <EksekusiPM />}
+             {activeMenu === 'teknisi_sparepart' && <TeknisiSparepart />}
+             {activeMenu === 'req_perbaikan' && <UserRequestPerbaikan />}
+          </div>
         </div>
       </main>
     </div>
