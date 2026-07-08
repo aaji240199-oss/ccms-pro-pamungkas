@@ -1590,7 +1590,10 @@ export default function App() {
       </div>
     </div>
   </div>
-)}
+  )}
+  </div>
+  ); // <-- 1. PASTIKAN ADA PENUTUP RETURN INI
+}; // <-- 2. PASTIKAN ADA PENUTUP KOMPONEN CetakLaporan INI
 
   const NavItem = ({ id, icon, label, roles }) => {
     if (!roles.includes(currentUser.role)) return null;
