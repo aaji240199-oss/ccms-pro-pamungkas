@@ -38,6 +38,11 @@ export default function App() {
   const [pmSchedules, setPmSchedules] = useState([]);
   const [pmParams, setPmParams] = useState([]);
   const [dailyActivities, setDailyActivities] = useState([]);
+  
+  // --- STATES: SPAREPART ---
+  const [spareparts, setSpareparts] = useState([]);
+  const [sparepartLogs, setSparepartLogs] = useState([]);
+  const [sparepartRequests, setSparepartRequests] = useState([]);
 
   // --- EFFECT: LOAD FONTAWESOME & FIREBASE AUTH ---
   useEffect(() => {
@@ -84,10 +89,14 @@ export default function App() {
     const unsubPmSchedules = onSnapshot(getPath('cmms_pmSchedules'), handleSnap(setPmSchedules), handleErr);
     const unsubPmParams = onSnapshot(getPath('cmms_pmParams'), handleSnap(setPmParams), handleErr);
     const unsubDailyActivities = onSnapshot(getPath('cmms_dailyActivities'), handleSnap(setDailyActivities), handleErr);
+    const unsubSpareparts = onSnapshot(getPath('cmms_spareparts'), handleSnap(setSpareparts), handleErr);
+    const unsubSparepartLogs = onSnapshot(getPath('cmms_sparepart_logs'), handleSnap(setSparepartLogs), handleErr);
+    const unsubSparepartRequests = onSnapshot(getPath('cmms_sparepart_requests'), handleSnap(setSparepartRequests), handleErr);
 
     return () => {
       unsubFactories(); unsubUsers(); unsubMachines(); unsubDailyParams();
       unsubDailyChecks(); unsubBreakdowns(); unsubPmSchedules(); unsubPmParams(); unsubDailyActivities();
+      unsubSpareparts(); unsubSparepartLogs(); unsubSparepartRequests();
     };
   }, [fbUser]);
 
@@ -146,7 +155,7 @@ export default function App() {
               onClick={() => { if (dialog.onConfirm) dialog.onConfirm(); setDialog(null); }} 
               className={`px-4 py-2 text-white rounded-lg text-sm font-medium shadow-sm transition-colors ${dialog.type === 'error' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}
             >
-              {dialog.type === 'confirm' ? 'Ya, Lanjutkan' : 'Tutup'}
+              {dialog.type === 'confirm' ? 'Ya, Eksekusi' : 'Tutup'}
             </button>
           </div>
         </div>
@@ -242,43 +251,62 @@ export default function App() {
           <div className="space-y-6">
             <h3 className="text-xl font-bold text-gray-800 border-b pb-2"><i className="fa-solid fa-desktop mr-2 text-gray-500"></i> Panel Monitoring Admin</h3>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              
+              {/* RINCIAN REQUEST PENDING */}
               <div className="bg-white p-5 rounded-xl shadow-sm border border-red-100">
                 <h4 className="font-bold text-red-700 mb-4 flex items-center"><i className="fa-solid fa-triangle-exclamation mr-2"></i> Permintaan Perbaikan (Pending)</h4>
-                <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
+                <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
                   {openBreakdowns.length > 0 ? openBreakdowns.slice().reverse().map(b => {
                     const machine = machines.find(m => m.id === b.machineId);
                     return (
-                      <div key={b.id} className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm shadow-sm">
-                        <div className="flex justify-between font-bold text-gray-800 mb-2">
+                      <div key={b.id} className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm shadow-sm relative">
+                        <div className="flex justify-between font-bold text-gray-800 mb-2 border-b border-red-100 pb-2">
                           <span>{machine?.name} <span className="text-gray-500 font-normal">({machine?.factory})</span></span>
-                          <span className="text-xs bg-red-200 text-red-800 px-2 py-0.5 rounded-full">Open</span>
+                          <span className="text-xs bg-red-200 text-red-800 px-2 py-0.5 rounded-full whitespace-nowrap">Open</span>
                         </div>
-                        <p className="text-gray-700 mb-2"><span className="font-semibold text-gray-600">Kendala:</span> {b.description}</p>
-                        <div className="text-xs text-gray-500 flex justify-between border-t border-red-200 pt-2">
-                          <span><i className="fa-solid fa-user mr-1"></i> Req: {b.requestBy}</span>
-                          <span><i className="fa-solid fa-clock mr-1"></i> {b.date}</span>
+                        <div className="mb-2">
+                           <p className="text-xs text-gray-500 mb-1">Requested by: <span className="font-bold text-gray-800">{b.requestBy || b.reportedBy || 'Unknown'}</span></p>
+                           <p className="text-gray-700 bg-white p-2 border border-red-100 rounded italic text-xs">"{b.description}"</p>
+                        </div>
+                        <div className="text-[10px] text-gray-500 flex justify-between border-t border-red-200 pt-2">
+                          <span><i className="fa-solid fa-clock mr-1"></i> Tgl Lapor: {b.date}</span>
                         </div>
                       </div>
                     )
                   }) : <p className="text-sm text-gray-500 italic text-center py-8 border border-dashed rounded-lg">Tidak ada permintaan perbaikan pending.</p>}
                 </div>
               </div>
+
+              {/* RINCIAN PERBAIKAN SELESAI */}
               <div className="bg-white p-5 rounded-xl shadow-sm border border-indigo-100">
                 <h4 className="font-bold text-indigo-700 mb-4 flex items-center"><i className="fa-solid fa-circle-check mr-2"></i> Perbaikan Dikerjakan (Terbaru)</h4>
-                <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
+                <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
                   {resolvedBreakdowns.length > 0 ? resolvedBreakdowns.slice().reverse().map(b => {
                     const machine = machines.find(m => m.id === b.machineId);
                     return (
                       <div key={b.id} className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg text-sm shadow-sm">
                         <div className="flex justify-between font-bold text-gray-800 mb-2 border-b border-indigo-200 pb-2">
                           <span>{machine?.name} <span className="text-gray-500 font-normal">({machine?.factory})</span></span>
-                          <span className="text-xs bg-indigo-200 text-indigo-800 px-2 py-0.5 rounded-full">Selesai</span>
+                          <span className="text-xs bg-indigo-200 text-indigo-800 px-2 py-0.5 rounded-full whitespace-nowrap">Selesai</span>
                         </div>
-                        <p className="text-gray-700 mb-1"><span className="font-semibold">Tindakan:</span> {b.analysis}</p>
-                        <p className="text-gray-700 mb-3"><span className="font-semibold">Part Diganti:</span> {b.partsReplaced}</p>
-                        <div className="text-[11px] text-gray-600 flex justify-between items-end bg-white p-2 rounded border border-indigo-100">
-                          <span>Teknisi: <strong className="text-indigo-900">{b.resolvedBy}</strong></span>
-                          <span className="text-right">Tgl: {b.startTime?.split(' ')[0]}<br/>Jam: {b.startTime?.split(' ')[1]} - {b.endTime?.split(' ')[1]}</span>
+                        
+                        <div className="mb-3 grid grid-cols-2 gap-2 text-xs border-b border-indigo-100 pb-2">
+                          <div>
+                            <span className="text-gray-500 block">Pelapor/Request:</span>
+                            <span className="font-bold text-gray-800"><i className="fa-solid fa-user text-gray-400 mr-1"></i> {b.requestBy || b.reportedBy || 'Unknown'}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-500 block">Diperbaiki Oleh (Teknisi):</span>
+                            <span className="font-bold text-indigo-700"><i className="fa-solid fa-user-wrench mr-1"></i> {b.resolvedBy}</span>
+                          </div>
+                        </div>
+
+                        <p className="text-gray-700 mb-1"><span className="font-semibold text-xs text-gray-500 block uppercase">Tindakan Perbaikan:</span> <span className="font-medium bg-white px-2 py-1 block rounded border border-indigo-100 mt-1">{b.analysis}</span></p>
+                        <p className="text-gray-700 mb-3 mt-2"><span className="font-semibold text-xs text-gray-500 block uppercase">Part Diganti:</span> <span className="font-medium">{b.partsReplaced || '-'}</span></p>
+                        
+                        <div className="text-[11px] text-gray-600 flex justify-between items-end pt-2 border-t border-indigo-200">
+                          <span>Durasi Pengerjaan:</span>
+                          <span className="text-right font-bold text-indigo-800">{b.startTime?.split(' ')[0]} <br/> {b.startTime?.split(' ')[1]} s/d {b.endTime?.split(' ')[1]}</span>
                         </div>
                       </div>
                     )
@@ -286,6 +314,7 @@ export default function App() {
                 </div>
               </div>
             </div>
+            
             <div className="bg-white p-5 rounded-xl shadow-sm border border-blue-100">
               <h4 className="font-bold text-blue-700 mb-4 flex items-center"><i className="fa-solid fa-list-check mr-2"></i> Daily Activity Teknisi (Monitoring)</h4>
               <div className="overflow-x-auto rounded-lg border border-blue-200">
@@ -337,7 +366,6 @@ export default function App() {
       if(!editName) return;
       showConfirm('Konfirmasi Perubahan', `Ubah nama pabrik dari "${oldName}" menjadi "${editName}"? Ini otomatis memperbarui lokasi semua User dan Mesin yang terkait.`, async () => {
         await updateDoc(docRef('cmms_factories', id), { name: editName });
-        // Batch update is ideally done with batched writes, doing sequential for simplicity
         users.filter(u => u.factory === oldName).forEach(async u => await updateDoc(docRef('cmms_users', u.id), { factory: editName }));
         machines.filter(m => m.factory === oldName).forEach(async m => await updateDoc(docRef('cmms_machines', m.id), { factory: editName }));
         setEditId(null);
@@ -495,6 +523,14 @@ export default function App() {
       showMessage('Sukses', 'Mesin baru berhasil ditambahkan.', 'success');
     };
 
+    const handleDeleteMachine = (mId, mName) => {
+      showConfirm('Hapus Mesin', `Apakah Anda yakin ingin menghapus mesin ${mName}? Data mesin ini akan dihapus permanen.`, async () => {
+        await deleteDoc(docRef('cmms_machines', mId));
+        showMessage('Dihapus', `Data mesin ${mName} berhasil dihapus dari Database.`, 'success');
+        if(selectedMachineParams === mId) setSelectedMachineParams(null);
+      });
+    };
+
     const handleSelectMachineParams = (mId) => {
       setSelectedMachineParams(mId);
       setTempParams(dailyParams.filter(p => p.machineId === mId).map(p => p.name));
@@ -548,7 +584,7 @@ export default function App() {
               </h4>
               <div className="space-y-3 max-h-[400px] overflow-auto pr-2">
                 {machines.map(m => (
-                  <div key={m.id} className="flex justify-between items-center bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                  <div key={m.id} className="flex justify-between items-center bg-white p-4 rounded-lg border border-gray-200 shadow-sm hover:border-blue-300 transition-colors">
                     <div className="flex items-start">
                       <div className="bg-blue-50 text-blue-600 p-2 rounded-lg mr-3 mt-1"><i className="fa-solid fa-box-open"></i></div>
                       <div>
@@ -556,7 +592,10 @@ export default function App() {
                         <div className="text-[10px] mt-1 space-x-2"><span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded uppercase font-bold">{m.factory}</span></div>
                       </div>
                     </div>
-                    <button type="button" onClick={() => handleSelectMachineParams(m.id)} className="bg-gray-800 text-white text-xs px-3 py-2 rounded-lg font-bold">Setup Master Cek</button>
+                    <div className="flex gap-2">
+                       <button type="button" onClick={() => handleSelectMachineParams(m.id)} className="bg-gray-800 hover:bg-black text-white text-xs px-3 py-2 rounded-lg font-bold transition-colors">Setup Cek</button>
+                       <button type="button" onClick={() => handleDeleteMachine(m.id, m.name)} className="bg-red-100 hover:bg-red-200 text-red-600 text-xs px-3 py-2 rounded-lg font-bold border border-red-200 transition-colors" title="Hapus Mesin"><i className="fa-solid fa-trash"></i></button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -588,6 +627,142 @@ export default function App() {
             </div>
           )}
         </div>
+      </div>
+    );
+  };
+
+  const AdminKelolaSparepart = () => {
+    const defaultFactory = factories[0]?.name || '';
+    const [spForm, setSpForm] = useState({ code: '', name: '', factory: defaultFactory, stock: '', unit: 'pcs' });
+    const [activeTab, setActiveTab] = useState('stok'); // 'stok' or 'request'
+
+    const handleAddSparepart = async (e) => {
+      e.preventDefault();
+      const newPartData = { ...spForm, stock: Number(spForm.stock) };
+      const docRefId = await addDoc(colRef('cmms_spareparts'), newPartData);
+      
+      // Catat log barang masuk pertama kali
+      await addDoc(colRef('cmms_sparepart_logs'), {
+        partId: docRefId.id, partCode: spForm.code, partName: spForm.name, factory: spForm.factory,
+        date: new Date().toLocaleString(), type: 'IN', qty: Number(spForm.stock), unit: spForm.unit,
+        remarks: 'Stok Awal (Master Baru)', user: currentUser.name
+      });
+      
+      setSpForm({ code: '', name: '', factory: defaultFactory, stock: '', unit: 'pcs' });
+      showMessage('Berhasil', 'Data Sparepart baru dan stok awal berhasil ditambahkan.', 'success');
+    };
+
+    const handleAddStock = (partId, partName, currentStock) => {
+      const addedQty = prompt(`Masukkan jumlah stok tambahan untuk ${partName}:`, "0");
+      const qtyNum = Number(addedQty);
+      if (qtyNum && qtyNum > 0) {
+        showConfirm('Tambah Stok', `Tambahkan ${qtyNum} ke ${partName}?`, async () => {
+          const part = spareparts.find(p => p.id === partId);
+          await updateDoc(docRef('cmms_spareparts', partId), { stock: currentStock + qtyNum });
+          await addDoc(colRef('cmms_sparepart_logs'), {
+            partId, partCode: part.code, partName: part.name, factory: part.factory,
+            date: new Date().toLocaleString(), type: 'IN', qty: qtyNum, unit: part.unit,
+            remarks: 'Penambahan Stok Manual (Admin)', user: currentUser.name
+          });
+          showMessage('Berhasil', 'Stok sparepart berhasil diperbarui.', 'success');
+        });
+      }
+    };
+
+    const handleFulfillRequest = (reqId, reqName) => {
+      showConfirm('Selesaikan Request', `Tandai request "${reqName}" sebagai sudah dipenuhi/disediakan?`, async () => {
+        await updateDoc(docRef('cmms_sparepart_requests', reqId), { status: 'Fulfilled', fulfillDate: new Date().toLocaleString() });
+        showMessage('Berhasil', 'Request telah ditandai selesai.', 'success');
+      });
+    };
+
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold text-gray-800">Manajemen Sparepart & Inventori</h2>
+        <div className="flex border-b-2 border-gray-200 mb-4 gap-2">
+           <button onClick={() => setActiveTab('stok')} className={`px-6 py-3 font-bold rounded-t-lg transition-colors ${activeTab === 'stok' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-200'}`}><i className="fa-solid fa-boxes-stacked mr-2"></i> Stok Sparepart</button>
+           <button onClick={() => setActiveTab('request')} className={`px-6 py-3 font-bold rounded-t-lg transition-colors ${activeTab === 'request' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-200'}`}>
+              <i className="fa-solid fa-hand-holding-hand mr-2"></i> Request Teknisi 
+              {sparepartRequests.filter(r => r.status === 'Pending').length > 0 && <span className="ml-2 bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{sparepartRequests.filter(r => r.status === 'Pending').length}</span>}
+           </button>
+        </div>
+
+        {activeTab === 'stok' && (
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <div className="bg-white p-6 rounded-xl shadow-sm xl:col-span-1 h-fit border-t-4 border-blue-500">
+              <h3 className="font-semibold text-lg mb-4 text-gray-800"><i className="fa-solid fa-plus-circle mr-2 text-blue-500"></i> Register Part Baru</h3>
+              <form onSubmit={handleAddSparepart} className="space-y-4">
+                <div><label className="block text-xs font-bold mb-1">Kode Part</label><input type="text" required className="w-full border-2 p-2 rounded-lg text-sm" value={spForm.code} onChange={e => setSpForm({...spForm, code: e.target.value})} /></div>
+                <div><label className="block text-xs font-bold mb-1">Nama Part</label><input type="text" required className="w-full border-2 p-2 rounded-lg text-sm" value={spForm.name} onChange={e => setSpForm({...spForm, name: e.target.value})} /></div>
+                <div>
+                  <label className="block text-xs font-bold mb-1">Lokasi Pabrik Gudang</label>
+                  <select required className="w-full border-2 p-2 rounded-lg text-sm" value={spForm.factory} onChange={e => setSpForm({...spForm, factory: e.target.value})}>
+                    {factories.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="block text-xs font-bold mb-1">Stok Awal</label><input type="number" required min="0" className="w-full border-2 p-2 rounded-lg text-sm" value={spForm.stock} onChange={e => setSpForm({...spForm, stock: e.target.value})} /></div>
+                  <div><label className="block text-xs font-bold mb-1">Satuan</label><input type="text" required placeholder="pcs, liter, set" className="w-full border-2 p-2 rounded-lg text-sm" value={spForm.unit} onChange={e => setSpForm({...spForm, unit: e.target.value})} /></div>
+                </div>
+                <button type="submit" className="bg-blue-600 text-white w-full py-3 rounded-lg font-bold shadow hover:bg-blue-700">Simpan Sparepart</button>
+              </form>
+            </div>
+            
+            <div className="bg-white p-6 rounded-xl shadow-sm xl:col-span-2">
+              <h3 className="font-semibold text-lg mb-4 text-gray-800">Daftar Ketersediaan Stok</h3>
+              <div className="overflow-x-auto max-h-[500px]">
+                <table className="w-full text-sm border-collapse min-w-[500px]">
+                  <thead>
+                    <tr className="bg-gray-100 text-left">
+                      <th className="p-3 font-semibold text-gray-700">Kode</th>
+                      <th className="p-3 font-semibold text-gray-700">Nama Part</th>
+                      <th className="p-3 font-semibold text-gray-700">Pabrik / Lokasi</th>
+                      <th className="p-3 font-semibold text-gray-700 text-center">Sisa Stok</th>
+                      <th className="p-3 font-semibold text-gray-700 text-center">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {spareparts.map(sp => (
+                      <tr key={sp.id} className="border-b hover:bg-gray-50">
+                        <td className="p-3 text-xs font-bold text-gray-500">{sp.code}</td>
+                        <td className="p-3 font-semibold text-gray-800">{sp.name}</td>
+                        <td className="p-3 text-xs"><span className="bg-gray-200 px-2 py-1 rounded">{sp.factory}</span></td>
+                        <td className="p-3 text-center font-black text-blue-700">{sp.stock} <span className="text-xs font-normal text-gray-500">{sp.unit}</span></td>
+                        <td className="p-3 text-center">
+                          <button onClick={() => handleAddStock(sp.id, sp.name, sp.stock)} className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1 rounded-lg text-xs font-bold border border-green-200"><i className="fa-solid fa-plus"></i> Tambah Stok</button>
+                        </td>
+                      </tr>
+                    ))}
+                    {spareparts.length === 0 && <tr><td colSpan="5" className="p-6 text-center text-gray-400">Belum ada data sparepart.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'request' && (
+          <div className="bg-white p-6 rounded-xl shadow-sm border-t-4 border-orange-500">
+             <h3 className="font-semibold text-lg mb-4 text-gray-800">Daftar Request Pengadaan Part Baru (Dari Teknisi)</h3>
+             <div className="space-y-4">
+               {sparepartRequests.slice().reverse().map(req => (
+                 <div key={req.id} className={`p-4 rounded-xl border flex flex-col md:flex-row justify-between items-center gap-4 ${req.status === 'Pending' ? 'border-orange-200 bg-orange-50' : 'border-gray-200 bg-gray-50'}`}>
+                   <div>
+                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded text-white ${req.status === 'Pending' ? 'bg-orange-500' : 'bg-green-500'}`}>{req.status}</span>
+                     <h4 className="font-bold text-gray-900 text-lg mt-1">{req.partName}</h4>
+                     <p className="text-xs text-gray-600 mt-1">Dibutuhkan: <strong className="text-gray-900">{req.qty}</strong> | Lokasi: <strong>{req.factory}</strong></p>
+                     <p className="text-sm italic text-gray-700 mt-2">"{req.remarks}"</p>
+                     <div className="text-[10px] text-gray-500 mt-2"><i className="fa-solid fa-user-astronaut mr-1"></i> Req By: {req.requestedBy} pada {req.date}</div>
+                   </div>
+                   {req.status === 'Pending' && (
+                     <button onClick={() => handleFulfillRequest(req.id, req.partName)} className="bg-orange-600 text-white font-bold px-6 py-3 rounded-lg hover:bg-orange-700 shadow-sm whitespace-nowrap"><i className="fa-solid fa-check-double mr-2"></i> Tandai Sudah Tersedia</button>
+                   )}
+                 </div>
+               ))}
+               {sparepartRequests.length === 0 && <div className="text-center py-10 border-2 border-dashed rounded-xl text-gray-400">Belum ada request part.</div>}
+             </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -745,6 +920,143 @@ export default function App() {
             </div>
           </div>
         </div>
+      </div>
+    );
+  };
+
+  const TeknisiSparepart = () => {
+    const [activeTab, setActiveTab] = useState('ambil'); // 'ambil' or 'request'
+    
+    // Form Pengambilan
+    const availableParts = spareparts.filter(sp => sp.factory === currentUser.factory);
+    const [useForm, setUseForm] = useState({ partId: '', qty: '', remarks: '' });
+    
+    // Form Request
+    const [reqForm, setReqForm] = useState({ partName: '', qty: '', remarks: '' });
+
+    const handleUsePart = async (e) => {
+      e.preventDefault();
+      const part = availableParts.find(p => p.id === useForm.partId);
+      if(!part) return;
+      const qtyNum = Number(useForm.qty);
+      
+      if(qtyNum > part.stock) {
+        showMessage('Gagal', `Stok tidak mencukupi! Stok saat ini: ${part.stock} ${part.unit}`, 'error');
+        return;
+      }
+      
+      showConfirm('Ambil Part', `Konfirmasi pengambilan ${qtyNum} ${part.unit} ${part.name}?`, async () => {
+        await updateDoc(docRef('cmms_spareparts', part.id), { stock: part.stock - qtyNum });
+        await addDoc(colRef('cmms_sparepart_logs'), {
+          partId: part.id, partCode: part.code, partName: part.name, factory: part.factory,
+          date: new Date().toLocaleString(), type: 'OUT', qty: qtyNum, unit: part.unit,
+          remarks: useForm.remarks, user: currentUser.name
+        });
+        showMessage('Berhasil', 'Pengambilan part berhasil dicatat.', 'success');
+        setUseForm({ partId: '', qty: '', remarks: '' });
+      });
+    };
+
+    const handleRequestPart = async (e) => {
+      e.preventDefault();
+      await addDoc(colRef('cmms_sparepart_requests'), {
+        partName: reqForm.partName, factory: currentUser.factory, qty: reqForm.qty,
+        remarks: reqForm.remarks, status: 'Pending', requestedBy: currentUser.name, date: new Date().toLocaleString()
+      });
+      showMessage('Terkirim', 'Request sparepart baru telah dikirim ke Admin.', 'success');
+      setReqForm({ partName: '', qty: '', remarks: '' });
+    };
+
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold text-gray-800">Gudang Sparepart ({currentUser.factory})</h2>
+        <div className="flex border-b-2 border-gray-200 mb-4 gap-2">
+           <button onClick={() => setActiveTab('ambil')} className={`px-6 py-3 font-bold rounded-t-lg transition-colors ${activeTab === 'ambil' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-200'}`}><i className="fa-solid fa-box-open mr-2"></i> Ambil / Gunakan Part</button>
+           <button onClick={() => setActiveTab('request')} className={`px-6 py-3 font-bold rounded-t-lg transition-colors ${activeTab === 'request' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-200'}`}><i className="fa-solid fa-cart-plus mr-2"></i> Request Part Baru</button>
+        </div>
+
+        {activeTab === 'ambil' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+             <div className="bg-white p-6 rounded-xl shadow-sm border-t-4 border-indigo-500 h-fit">
+                <h3 className="font-semibold text-lg mb-4 text-gray-800"><i className="fa-solid fa-dolly mr-2 text-indigo-500"></i> Form Pengambilan Part</h3>
+                <form onSubmit={handleUsePart} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold mb-1">Pilih Sparepart Tersedia</label>
+                    <select required className="w-full border-2 p-3 rounded-lg text-sm bg-gray-50" value={useForm.partId} onChange={e => setUseForm({...useForm, partId: e.target.value})}>
+                      <option value="">-- Pilih Part --</option>
+                      {availableParts.map(sp => <option key={sp.id} value={sp.id}>{sp.code} - {sp.name} (Sisa: {sp.stock} {sp.unit})</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold mb-1">Jumlah Diambil</label>
+                    <input type="number" required min="1" className="w-full border-2 p-3 rounded-lg text-sm bg-gray-50" value={useForm.qty} onChange={e => setUseForm({...useForm, qty: e.target.value})} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold mb-1">Digunakan Untuk (Deskripsi/Nama Mesin)</label>
+                    <textarea required rows="2" className="w-full border-2 p-3 rounded-lg text-sm bg-gray-50" placeholder="Contoh: Ganti bearing mesin mixer B..." value={useForm.remarks} onChange={e => setUseForm({...useForm, remarks: e.target.value})}></textarea>
+                  </div>
+                  <button type="submit" className="w-full bg-indigo-600 text-white font-bold py-4 rounded-lg shadow-md hover:bg-indigo-700">Catat Pengambilan</button>
+                </form>
+             </div>
+             
+             <div className="bg-white p-6 rounded-xl shadow-sm flex flex-col max-h-[500px]">
+                <h3 className="font-semibold text-lg mb-4 text-gray-800">Histori Pengambilan Anda</h3>
+                <div className="overflow-y-auto space-y-3 pr-2">
+                  {sparepartLogs.filter(l => l.type === 'OUT' && l.user === currentUser.name).slice().reverse().map(log => (
+                    <div key={log.id} className="p-3 border rounded-lg bg-indigo-50 border-indigo-100">
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="font-bold text-gray-900">{log.partName} <span className="text-xs text-gray-500 font-normal">({log.partCode})</span></span>
+                        <span className="text-xs font-black text-red-600 bg-red-100 px-2 py-0.5 rounded border border-red-200">-{log.qty} {log.unit}</span>
+                      </div>
+                      <p className="text-xs text-gray-700 italic mb-2">Tujuan: {log.remarks}</p>
+                      <span className="text-[10px] text-gray-500 font-bold uppercase"><i className="fa-regular fa-clock"></i> {log.date}</span>
+                    </div>
+                  ))}
+                  {sparepartLogs.filter(l => l.type === 'OUT' && l.user === currentUser.name).length === 0 && <div className="text-center py-6 text-gray-400 border-2 border-dashed rounded-xl">Belum ada histori pengambilan.</div>}
+                </div>
+             </div>
+          </div>
+        )}
+
+        {activeTab === 'request' && (
+           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-white p-6 rounded-xl shadow-sm border-t-4 border-orange-500 h-fit">
+                <h3 className="font-semibold text-lg mb-4 text-gray-800"><i className="fa-solid fa-cart-plus mr-2 text-orange-500"></i> Form Request Sparepart Baru</h3>
+                <p className="text-xs text-gray-500 mb-4 bg-orange-50 p-2 border border-orange-100 rounded">Gunakan form ini HANYA jika part yang dibutuhkan belum tersedia di master stok pabrik Anda.</p>
+                <form onSubmit={handleRequestPart} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold mb-1">Nama / Spesifikasi Part</label>
+                    <input type="text" required placeholder="Contoh: V-Belt B-42 Mitsuboshi" className="w-full border-2 p-3 rounded-lg text-sm bg-gray-50" value={reqForm.partName} onChange={e => setReqForm({...reqForm, partName: e.target.value})} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold mb-1">Estimasi Kebutuhan (Qty)</label>
+                    <input type="text" required placeholder="Contoh: 2 pcs" className="w-full border-2 p-3 rounded-lg text-sm bg-gray-50" value={reqForm.qty} onChange={e => setReqForm({...reqForm, qty: e.target.value})} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold mb-1">Tingkat Urgensi / Alasan Request</label>
+                    <textarea required rows="2" className="w-full border-2 p-3 rounded-lg text-sm bg-gray-50" placeholder="Sangat mendesak untuk perbaikan mesin..." value={reqForm.remarks} onChange={e => setReqForm({...reqForm, remarks: e.target.value})}></textarea>
+                  </div>
+                  <button type="submit" className="w-full bg-orange-600 text-white font-bold py-4 rounded-lg shadow-md hover:bg-orange-700">Kirim Request Ke Admin</button>
+                </form>
+              </div>
+
+              <div className="bg-white p-6 rounded-xl shadow-sm flex flex-col max-h-[500px]">
+                <h3 className="font-semibold text-lg mb-4 text-gray-800">Status Request Anda</h3>
+                <div className="overflow-y-auto space-y-3 pr-2">
+                  {sparepartRequests.filter(r => r.requestedBy === currentUser.name).slice().reverse().map(req => (
+                     <div key={req.id} className="p-3 border rounded-lg bg-gray-50 relative">
+                        <span className={`absolute top-2 right-2 text-[10px] font-bold px-2 py-0.5 rounded text-white ${req.status === 'Pending' ? 'bg-orange-500' : 'bg-green-500'}`}>{req.status}</span>
+                        <p className="font-bold text-gray-900 pr-16">{req.partName}</p>
+                        <p className="text-xs text-gray-600 mb-1">Qty: {req.qty}</p>
+                        <p className="text-xs text-gray-700 italic border-t border-dashed pt-1 mt-1">"{req.remarks}"</p>
+                        <span className="text-[10px] text-gray-500 mt-2 block">{req.date}</span>
+                     </div>
+                  ))}
+                  {sparepartRequests.filter(r => r.requestedBy === currentUser.name).length === 0 && <div className="text-center py-6 text-gray-400 border-2 border-dashed rounded-xl">Belum ada request diajukan.</div>}
+                </div>
+              </div>
+           </div>
+        )}
       </div>
     );
   };
@@ -998,17 +1310,39 @@ export default function App() {
   };
 
   const CetakLaporan = () => {
-    // Komponen cetak laporan dipertahankan namun menggunakan format pencarian id berupa string
     const [activeTab, setActiveTab] = useState('harian');
     const [filterFactory, setFilterFactory] = useState('All');
     const [filterMachine, setFilterMachine] = useState('');
     const [filterMonth, setFilterMonth] = useState('');
+    const [filterYear, setFilterYear] = useState(new Date().getFullYear().toString());
     
     const machinesToPrint = filterFactory === 'All' ? machines : machines.filter(m => m.factory === filterFactory);
+    
     const filteredChecks = dailyChecks.filter(c => {
       const matchMachine = filterMachine ? c.machineId === filterMachine : machinesToPrint.find(m => m.id === c.machineId);
       const matchMonth = filterMonth ? c.date.startsWith(filterMonth) : true;
       return matchMachine && matchMonth;
+    });
+
+    const filteredPMs = pmSchedules.filter(s => {
+      const isDone = s.status === 'Selesai' || s.status === 'Terverifikasi';
+      const matchMachine = filterMachine ? s.machineId === filterMachine : machinesToPrint.find(m => m.id === s.machineId);
+      const matchYear = filterYear ? s.date.startsWith(filterYear) : true;
+      return isDone && matchMachine && matchYear;
+    });
+
+    const filteredSparepartLogs = sparepartLogs.filter(log => {
+       const matchFactory = filterFactory === 'All' ? true : log.factory === filterFactory;
+       let matchDate = true;
+       if(activeTab === 'sparepart') {
+         if (filterMonth) {
+            const [year, month] = filterMonth.split('-');
+            matchDate = log.date.includes(`${month}/${year}`) || log.date.includes(`${year}-${month}`);
+         } else if (filterYear) {
+            matchDate = log.date.includes(filterYear);
+         }
+       }
+       return matchFactory && matchDate;
     });
 
     return (
@@ -1017,56 +1351,186 @@ export default function App() {
           <div className="bg-gray-800 text-white p-6 rounded-xl mb-6">
             <h2 className="text-2xl font-bold">Pusat Cetak Dokumen</h2>
           </div>
-          <div className="bg-white p-6 rounded-xl flex gap-4 items-end mb-6 border">
+          
+          <div className="flex border-b-2 border-gray-200 mb-6 gap-2 overflow-x-auto pb-1">
+             <button onClick={() => setActiveTab('harian')} className={`whitespace-nowrap px-6 py-3 font-bold rounded-t-lg transition-colors ${activeTab === 'harian' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-200'}`}><i className="fa-solid fa-clipboard-check mr-2"></i> Rekap Harian</button>
+             <button onClick={() => setActiveTab('pm')} className={`whitespace-nowrap px-6 py-3 font-bold rounded-t-lg transition-colors ${activeTab === 'pm' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-200'}`}><i className="fa-solid fa-calendar-check mr-2"></i> Riwayat PM Tahunan</button>
+             <button onClick={() => setActiveTab('sparepart')} className={`whitespace-nowrap px-6 py-3 font-bold rounded-t-lg transition-colors ${activeTab === 'sparepart' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-200'}`}><i className="fa-solid fa-boxes-stacked mr-2"></i> Mutasi Sparepart</button>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl flex gap-4 items-end mb-6 border flex-wrap">
             <div>
-              <label className="block text-xs font-bold mb-1">Filter Mesin</label>
-              <select className="border-2 p-3 rounded" value={filterMachine} onChange={e => setFilterMachine(e.target.value)}>
-                <option value="">Semua Mesin</option>
-                {machinesToPrint.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              <label className="block text-xs font-bold mb-1">Filter Pabrik</label>
+              <select className="border-2 p-3 rounded min-w-[150px]" value={filterFactory} onChange={e => {setFilterFactory(e.target.value); setFilterMachine('');}}>
+                <option value="All">Semua Pabrik</option>
+                {factories.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
               </select>
             </div>
-            <div>
-              <label className="block text-xs font-bold mb-1">Bulan</label>
-              <input type="month" className="border-2 p-3 rounded" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} />
-            </div>
-            <button onClick={() => window.print()} className="bg-gray-900 text-white px-6 py-3 rounded-lg font-bold">Cetak / PDF</button>
+            
+            {activeTab !== 'sparepart' && (
+              <div>
+                <label className="block text-xs font-bold mb-1">Filter Mesin</label>
+                <select className="border-2 p-3 rounded min-w-[150px]" value={filterMachine} onChange={e => setFilterMachine(e.target.value)}>
+                  <option value="">Semua Mesin</option>
+                  {machinesToPrint.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+              </div>
+            )}
+            
+            {activeTab === 'harian' || activeTab === 'sparepart' ? (
+              <div>
+                <label className="block text-xs font-bold mb-1">Filter Bulan {activeTab === 'sparepart' && '(Opsional)'}</label>
+                <input type="month" className="border-2 p-3 rounded" value={filterMonth} onChange={e => {setFilterMonth(e.target.value); if(activeTab==='sparepart') setFilterYear('');}} />
+              </div>
+            ) : null}
+
+            {activeTab === 'pm' || activeTab === 'sparepart' ? (
+              <div>
+                <label className="block text-xs font-bold mb-1">Filter Tahun {activeTab === 'sparepart' && '(Opsional)'}</label>
+                <input type="number" className="border-2 p-3 rounded w-32" value={filterYear} onChange={e => {setFilterYear(e.target.value); if(activeTab==='sparepart') setFilterMonth('');}} />
+              </div>
+            ) : null}
+            
+            <button onClick={() => window.print()} className="bg-gray-900 text-white px-6 py-3 rounded-lg font-bold ml-auto shadow-lg"><i className="fa-solid fa-print mr-2"></i> Cetak / PDF</button>
           </div>
         </div>
 
-        <div className="bg-white p-8 rounded-xl print:p-0 border print:border-0">
-          <h1 className="text-2xl font-bold uppercase mb-4">Laporan Pengecekan Harian</h1>
-          <table className="w-full border-collapse border border-gray-900 text-sm">
-            <thead>
-              <tr className="bg-gray-200">
-                <th className="border border-gray-900 p-2">Tanggal</th>
-                <th className="border border-gray-900 p-2">Aset Mesin</th>
-                <th className="border border-gray-900 p-2">Teknisi</th>
-                <th className="border border-gray-900 p-2">Hasil Cek</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredChecks.map(check => {
-                const machine = machines.find(m => m.id === check.machineId);
-                return (
-                  <tr key={check.id}>
-                    <td className="border border-gray-900 p-2 text-center">{check.date}</td>
-                    <td className="border border-gray-900 p-2 font-bold">{machine?.name}</td>
-                    <td className="border border-gray-900 p-2 text-center">{check.teknisi}</td>
-                    <td className="border border-gray-900 p-2">
-                      <ul className="space-y-1">
-                        {Object.entries(check.results).map(([paramId, res]) => (
-                          <li key={paramId} className="text-xs">
-                            <span className="font-bold">{dailyParams.find(p => p.id === paramId)?.name || 'Terhapus'}</span>: [{res.status}] {res.note && `(${res.note})`}
-                          </li>
-                        ))}
-                      </ul>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        {/* HALAMAN CETAK: HARIAN */}
+        {activeTab === 'harian' && (
+          <div className="bg-white p-8 rounded-xl print:p-0 border print:border-0 print:shadow-none shadow-sm">
+            <h1 className="text-2xl font-bold uppercase mb-4 text-center print:text-left border-b-2 border-gray-900 pb-2">Laporan Pengecekan Harian</h1>
+            <table className="w-full border-collapse border border-gray-900 text-sm">
+              <thead>
+                <tr className="bg-gray-200">
+                  <th className="border border-gray-900 p-2">Tanggal</th>
+                  <th className="border border-gray-900 p-2">Aset Mesin</th>
+                  <th className="border border-gray-900 p-2 text-center">Teknisi</th>
+                  <th className="border border-gray-900 p-2">Hasil Cek (Parameter & Ket)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredChecks.length > 0 ? filteredChecks.map(check => {
+                  const machine = machines.find(m => m.id === check.machineId);
+                  return (
+                    <tr key={check.id}>
+                      <td className="border border-gray-900 p-2 text-center whitespace-nowrap">{check.date}</td>
+                      <td className="border border-gray-900 p-2 font-bold">{machine?.name} <br/><span className="text-xs font-normal text-gray-500">{machine?.factory}</span></td>
+                      <td className="border border-gray-900 p-2 text-center">{check.teknisi}</td>
+                      <td className="border border-gray-900 p-2">
+                        <ul className="space-y-1">
+                          {Object.entries(check.results).map(([paramId, res]) => (
+                            <li key={paramId} className="text-xs">
+                              <span className="font-bold">{dailyParams.find(p => p.id === paramId)?.name || 'Terhapus'}</span>: [{res.status}] {res.note && `(${res.note})`}
+                            </li>
+                          ))}
+                        </ul>
+                      </td>
+                    </tr>
+                  )
+                }) : (
+                  <tr><td colSpan="4" className="border border-gray-900 p-8 text-center text-gray-500 font-bold">Data tidak ditemukan sesuai filter.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* HALAMAN CETAK: PREVENTIVE MAINTENANCE */}
+        {activeTab === 'pm' && (
+           <div className="bg-white p-8 rounded-xl print:p-0 border print:border-0 print:shadow-none shadow-sm">
+             <h1 className="text-2xl font-bold uppercase mb-4 text-center print:text-left border-b-2 border-gray-900 pb-2">Laporan Preventive Maintenance (PM)</h1>
+             <table className="w-full border-collapse border border-gray-900 text-sm">
+               <thead>
+                 <tr className="bg-gray-200">
+                   <th className="border border-gray-900 p-2">Tgl Eksekusi</th>
+                   <th className="border border-gray-900 p-2">Data Mesin</th>
+                   <th className="border border-gray-900 p-2">Judul PM & Catatan</th>
+                   <th className="border border-gray-900 p-2">Otorisasi (Teknisi & SPV)</th>
+                 </tr>
+               </thead>
+               <tbody>
+                 {filteredPMs.length > 0 ? filteredPMs.map(pm => {
+                   const machine = machines.find(m => m.id === pm.machineId);
+                   return (
+                     <tr key={pm.id}>
+                       <td className="border border-gray-900 p-2 text-center whitespace-nowrap align-top">
+                          <strong>{pm.executeDate}</strong><br/>
+                          <span className="text-xs text-gray-600">{pm.pmStartTime} - {pm.pmEndTime}</span>
+                       </td>
+                       <td className="border border-gray-900 p-2 align-top">
+                         <span className="font-bold text-base">{machine?.name}</span><br/>
+                         <span className="text-xs bg-gray-100 px-1 py-0.5 border border-gray-300 rounded print:border-none print:p-0">{machine?.code} | {machine?.factory}</span>
+                       </td>
+                       <td className="border border-gray-900 p-2 align-top">
+                         <strong className="block mb-1">{pm.title}</strong>
+                         <p className="text-xs italic text-gray-700">Catatan: {pm.executionNote || '-'}</p>
+                       </td>
+                       <td className="border border-gray-900 p-2 align-top">
+                         <div className="text-xs mb-1"><span className="text-gray-500 w-16 inline-block">Pelaksana:</span> <strong>{pm.executedBy}</strong></div>
+                         <div className="text-xs"><span className="text-gray-500 w-16 inline-block">Verifikator:</span> <strong>{pm.verifiedBy || '-'}</strong></div>
+                         <div className="mt-2 text-[10px] font-bold uppercase p-1 text-center border bg-gray-50">{pm.status}</div>
+                       </td>
+                     </tr>
+                   )
+                 }) : (
+                   <tr><td colSpan="4" className="border border-gray-900 p-8 text-center text-gray-500 font-bold">Data tidak ditemukan sesuai filter.</td></tr>
+                 )}
+               </tbody>
+             </table>
+           </div>
+        )}
+
+        {/* HALAMAN CETAK: MUTASI SPAREPART */}
+        {activeTab === 'sparepart' && (
+           <div className="bg-white p-8 rounded-xl print:p-0 border print:border-0 print:shadow-none shadow-sm">
+             <h1 className="text-2xl font-bold uppercase mb-4 text-center print:text-left border-b-2 border-gray-900 pb-2">Laporan Mutasi Sparepart</h1>
+             <div className="mb-4 text-sm font-bold text-gray-600 uppercase print:block hidden">
+                <p>Filter Area: {filterFactory}</p>
+                <p>Periode: {filterMonth ? `Bulan ${filterMonth}` : (filterYear ? `Tahun ${filterYear}` : 'Semua Waktu')}</p>
+             </div>
+             
+             <table className="w-full border-collapse border border-gray-900 text-sm mt-4">
+               <thead>
+                 <tr className="bg-gray-200">
+                   <th className="border border-gray-900 p-2 w-32">Waktu Transaksi</th>
+                   <th className="border border-gray-900 p-2">Item Sparepart</th>
+                   <th className="border border-gray-900 p-2 text-center w-24">Tipe</th>
+                   <th className="border border-gray-900 p-2 text-center w-24">Qty Mutasi</th>
+                   <th className="border border-gray-900 p-2">Keterangan / Tujuan</th>
+                   <th className="border border-gray-900 p-2 text-center">User/PIC</th>
+                 </tr>
+               </thead>
+               <tbody>
+                 {filteredSparepartLogs.length > 0 ? filteredSparepartLogs.slice().reverse().map(log => (
+                   <tr key={log.id} className="hover:bg-gray-50 print:hover:bg-transparent">
+                     <td className="border border-gray-900 p-2 text-xs">{log.date}</td>
+                     <td className="border border-gray-900 p-2">
+                       <span className="font-bold block">{log.partName}</span>
+                       <span className="text-[10px] uppercase text-gray-500">{log.partCode} | {log.factory}</span>
+                     </td>
+                     <td className="border border-gray-900 p-2 text-center font-bold">
+                        {log.type === 'IN' ? <span className="text-green-700">IN (Masuk)</span> : <span className="text-red-700">OUT (Keluar)</span>}
+                     </td>
+                     <td className={`border border-gray-900 p-2 text-center font-black ${log.type === 'IN' ? 'text-green-700' : 'text-red-700'}`}>
+                        {log.type === 'IN' ? '+' : '-'}{log.qty} <span className="text-xs font-normal text-gray-600">{log.unit}</span>
+                     </td>
+                     <td className="border border-gray-900 p-2 text-xs italic">{log.remarks}</td>
+                     <td className="border border-gray-900 p-2 text-center text-xs font-medium">{log.user}</td>
+                   </tr>
+                 )) : (
+                   <tr><td colSpan="6" className="border border-gray-900 p-8 text-center text-gray-500 font-bold">Data transaksi sparepart tidak ditemukan sesuai filter.</td></tr>
+                 )}
+               </tbody>
+             </table>
+             
+             <div className="hidden print:flex justify-end mt-16 text-center text-sm font-bold uppercase">
+               <div className="w-56">
+                 <p className="mb-20">Admin / Gudang Sparepart</p>
+                 <p className="border-t-2 border-gray-900 pt-2">( ........................................ )</p>
+               </div>
+             </div>
+           </div>
+        )}
       </div>
     );
   };
@@ -1102,6 +1566,7 @@ export default function App() {
               <NavItem id="kelola_pabrik" icon="fa-city" label="Master Pabrik / Lokasi" roles={['admin']} />
               <NavItem id="kelola_user" icon="fa-users-gear" label="Manajemen Akun" roles={['admin']} />
               <NavItem id="kelola_mesin" icon="fa-network-wired" label="Aset & Parameter" roles={['admin']} />
+              <NavItem id="kelola_sparepart" icon="fa-boxes-stacked" label="Manajemen Sparepart" roles={['admin']} />
               <NavItem id="setup_pm" icon="fa-calendar-days" label="Jadwal & Verifikasi PM" roles={['admin']} />
               <NavItem id="cetak" icon="fa-print" label="Pusat Dokumen (Cetak)" roles={['admin']} />
             </div>
@@ -1110,6 +1575,7 @@ export default function App() {
               <NavItem id="cek_harian" icon="fa-clipboard-list" label="Checklist Rutin Mesin" roles={['teknisi']} />
               <NavItem id="penanganan_rusak" icon="fa-screwdriver-wrench" label="Tangani Breakdown" roles={['teknisi']} />
               <NavItem id="eksekusi_pm" icon="fa-business-time" label="Jadwal PM Aktif" roles={['teknisi']} />
+              <NavItem id="teknisi_sparepart" icon="fa-box-open" label="Gudang & Request Part" roles={['teknisi']} />
             </div>
             <div className={currentUser.role === 'user' ? 'pt-6 pb-2' : 'hidden'}>
               <NavItem id="req_perbaikan" icon="fa-triangle-exclamation" label="Lapor Kendala Mesin" roles={['user']} />
@@ -1128,12 +1594,14 @@ export default function App() {
           {activeMenu === 'kelola_pabrik' && <AdminKelolaPabrik />}
           {activeMenu === 'kelola_user' && <AdminKelolaUser />}
           {activeMenu === 'kelola_mesin' && <AdminKelolaMesin />}
+          {activeMenu === 'kelola_sparepart' && <AdminKelolaSparepart />}
           {activeMenu === 'setup_pm' && <SetupPM />}
           {activeMenu === 'cetak' && <CetakLaporan />}
           {activeMenu === 'daily_activity' && <TeknisiDailyActivity />}
           {activeMenu === 'cek_harian' && <CekHarian />}
           {activeMenu === 'penanganan_rusak' && <PenangananKerusakan />}
           {activeMenu === 'eksekusi_pm' && <EksekusiPM />}
+          {activeMenu === 'teknisi_sparepart' && <TeknisiSparepart />}
           {activeMenu === 'req_perbaikan' && <UserRequestPerbaikan />}
         </div>
       </main>
