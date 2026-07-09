@@ -33,6 +33,7 @@ export default function App() {
   const [notifications, setNotifications] = useState([]);
   const [showScanner, setShowScanner] = useState(false);
   const [chatTicket, setChatTicket] = useState(null); // State untuk Fitur Diskusi
+  const [dismissedNotifs, setDismissedNotifs] = useState([]); // State untuk notif yang ditutup
 
   // --- STATES: DATABASE ---
   const [factories, setFactories] = useState([]);
@@ -147,8 +148,10 @@ export default function App() {
          notifs.push({ id: `stock_${sp.id}`, title: 'Stok Menipis', text: `${sp.name} sisa ${sp.stock} ${sp.unit}`, type: 'warning', action: 'kelola_sparepart' })
       );
     }
-    setNotifications(notifs.slice(0, 8));
-  }, [breakdowns, sparepartRequests, pmSchedules, currentUser, machines, spareparts]);
+    
+    // Filter notif yang sudah di-dismiss oleh user
+    setNotifications(notifs.filter(n => !dismissedNotifs.includes(n.id)).slice(0, 8));
+  }, [breakdowns, sparepartRequests, pmSchedules, currentUser, machines, spareparts, dismissedNotifs]);
 
 
   // --- HELPER FUNCTIONS ---
@@ -201,6 +204,26 @@ export default function App() {
     link.href = URL.createObjectURL(blob);
     link.download = filename;
     link.click();
+  };
+
+  // Fungsi Hitung Downtime
+  const calculateDowntime = (start, end) => {
+    if (!start || !end) return '-';
+    const s = new Date(start);
+    const e = new Date(end);
+    if (isNaN(s) || isNaN(e)) return '-';
+    const diff = Math.max(0, e - s);
+    const m = Math.floor((diff / (1000 * 60)) % 60);
+    const h = Math.floor(diff / (1000 * 60 * 60));
+    return `${h} Jam ${m} Menit`;
+  };
+
+  // Fungsi Hapus Request / Tiket
+  const handleDeleteBreakdown = (id, itemName) => {
+    showConfirm('Hapus Request?', `Yakin ingin menghapus atau membatalkan tiket kerusakan untuk "${itemName}"? Tindakan ini tidak dapat dikembalikan.`, async () => {
+      await deleteDoc(docRef('cmms_breakdowns', id));
+      showMessage('Berhasil', 'Tiket kerusakan berhasil dihapus.', 'success');
+    });
   };
 
   // --- KOMPONEN UI UTAMA ---
@@ -641,57 +664,129 @@ export default function App() {
 
         {currentUser.role === 'admin' && viewMode === 'overview' && (
           <div className="space-y-6 animate-[fadeIn_0.3s]">
-            <h3 className="text-xl font-bold text-gray-800 border-b pb-2"><i className="fa-solid fa-desktop mr-2 text-gray-500"></i> Panel Log Aktivitas</h3>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white p-5 rounded-xl shadow-sm border border-red-100">
-                <h4 className="font-bold text-red-700 mb-4 flex items-center"><i className="fa-solid fa-triangle-exclamation mr-2"></i> Perbaikan Pending</h4>
-                <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
-                  {openBreakdowns.length > 0 ? openBreakdowns.slice().reverse().map(b => {
-                    const machine = machines.find(m => m.id === b.machineId);
-                    return (
-                      <div key={b.id} className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm shadow-sm relative">
-                        <div className="flex justify-between font-bold text-gray-800 mb-2 border-b border-red-100 pb-2">
-                          <span>{machine?.name} <span className="text-gray-500 font-normal">({machine?.factory})</span></span>
-                          <span className="text-xs bg-red-200 text-red-800 px-2 py-0.5 rounded-full whitespace-nowrap">Open</span>
-                        </div>
-                        <div className="mb-2">
-                           <p className="text-xs text-gray-500 mb-1">Requested by: <span className="font-bold text-gray-800">{b.requestBy || b.reportedBy || 'Unknown'}</span></p>
-                           <p className="text-gray-700 bg-white p-2 border border-red-100 rounded italic text-xs">"{b.description}"</p>
-                        </div>
-                        <div className="text-[10px] text-gray-500 flex justify-between border-t border-red-200 pt-2">
-                          <span><i className="fa-solid fa-clock mr-1"></i> {b.date}</span>
-                        </div>
-                      </div>
-                    )
-                  }) : <p className="text-sm text-gray-500 italic text-center py-8 border border-dashed rounded-lg">Tidak ada perbaikan pending.</p>}
+            <h3 className="text-xl font-bold text-gray-800 border-b pb-2"><i className="fa-solid fa-chart-line mr-2 text-gray-500"></i> Pantauan Visual & Jurnal Harian</h3>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              
+              {/* Chart Status Mesin (Donut) */}
+              <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center">
+                <h4 className="font-bold text-gray-700 mb-4 w-full text-left">Status Operasional Mesin</h4>
+                <div className="relative w-32 h-32 rounded-full mb-4 flex items-center justify-center shadow-inner" style={{ background: `conic-gradient(#ef4444 0% ${100 - persentaseSehat}%, #22c55e ${100 - persentaseSehat}% 100%)` }}>
+                   <div className="w-24 h-24 bg-white rounded-full flex flex-col items-center justify-center shadow">
+                     <span className="text-2xl font-black text-gray-800">{persentaseSehat}%</span>
+                     <span className="text-[9px] text-gray-500 font-bold uppercase">Sehat</span>
+                   </div>
+                </div>
+                <div className="flex gap-4 w-full justify-center text-xs font-bold mt-2">
+                   <div className="flex items-center text-green-700"><span className="w-3 h-3 bg-green-500 rounded-full mr-2"></span>{totalMesin - mesinRusak} Operasi</div>
+                   <div className="flex items-center text-red-700"><span className="w-3 h-3 bg-red-500 rounded-full mr-2"></span>{mesinRusak} Rusak</div>
                 </div>
               </div>
 
-              <div className="bg-white p-5 rounded-xl shadow-sm border border-indigo-100">
-                <h4 className="font-bold text-indigo-700 mb-4 flex items-center"><i className="fa-solid fa-circle-check mr-2"></i> Perbaikan Selesai</h4>
-                <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
-                  {resolvedBreakdowns.length > 0 ? resolvedBreakdowns.slice().reverse().map(b => {
-                    const machine = machines.find(m => m.id === b.machineId);
-                    return (
-                      <div key={b.id} className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg text-sm shadow-sm">
-                        <div className="flex justify-between font-bold text-gray-800 mb-2 border-b border-indigo-200 pb-2">
-                          <span>{machine?.name} <span className="text-gray-500 font-normal">({machine?.factory})</span></span>
-                          <span className="text-xs bg-indigo-200 text-indigo-800 px-2 py-0.5 rounded-full whitespace-nowrap">Selesai</span>
-                        </div>
-                        <div className="mb-3 grid grid-cols-2 gap-2 text-xs border-b border-indigo-100 pb-2">
-                          <div><span className="text-gray-500 block">Request:</span><span className="font-bold text-gray-800">{b.requestBy || b.reportedBy}</span></div>
-                          <div><span className="text-gray-500 block">Teknisi:</span><span className="font-bold text-indigo-700">{b.resolvedBy}</span></div>
-                        </div>
-                        <p className="text-gray-700 mb-1"><span className="font-semibold text-xs text-gray-500 block uppercase">Tindakan:</span> <span className="font-medium bg-white px-2 py-1 block rounded border mt-1">{b.analysis}</span></p>
-                        <p className="text-gray-700 mb-3 mt-2"><span className="font-semibold text-xs text-gray-500 block uppercase">Part Ganti:</span> <span className="font-medium">{b.partsReplaced || '-'}</span></p>
+              {/* Chart Progress PM (Donut) */}
+              <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center">
+                <h4 className="font-bold text-gray-700 mb-4 w-full text-left">Progress PM Terjadwal</h4>
+                <div className="relative w-32 h-32 rounded-full mb-4 flex items-center justify-center shadow-inner" style={{ background: `conic-gradient(#3b82f6 0% ${kpiPM}%, #e5e7eb ${kpiPM}% 100%)` }}>
+                   <div className="w-24 h-24 bg-white rounded-full flex flex-col items-center justify-center shadow">
+                     <span className="text-2xl font-black text-gray-800">{kpiPM}%</span>
+                     <span className="text-[9px] text-gray-500 font-bold uppercase">Selesai</span>
+                   </div>
+                </div>
+                <div className="flex gap-4 w-full justify-center text-xs font-bold mt-2">
+                   <div className="flex items-center text-blue-700"><span className="w-3 h-3 bg-blue-500 rounded-full mr-2"></span>{completedPM} Selesai</div>
+                   <div className="flex items-center text-gray-500"><span className="w-3 h-3 bg-gray-200 rounded-full mr-2"></span>{totalScheduledPM - completedPM} Pending</div>
+                </div>
+              </div>
+
+              {/* Daftar Daily Activity Teknisi */}
+              <div className="bg-white p-5 rounded-xl shadow-sm border border-blue-100 lg:col-span-1 flex flex-col">
+                <h4 className="font-bold text-blue-800 mb-4 flex items-center border-b pb-2"><i className="fa-solid fa-list-check mr-2"></i> Jurnal Teknisi Hari Ini</h4>
+                <div className="space-y-3 max-h-60 overflow-y-auto pr-2 flex-1">
+                  {dailyActivities.filter(a => filterByDate(a.date, new Date().toISOString().split('T')[0], false) && availableMachines.find(m => m.factory === a.factory || a.factory === 'All')).map(act => (
+                    <div key={act.id} className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-sm">
+                      <div className="flex justify-between font-bold text-gray-800 mb-1">
+                        <span>{act.teknisi}</span>
+                        <span className="text-[10px] bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full">{act.startTime} - {act.endTime}</span>
                       </div>
-                    )
-                  }) : <p className="text-sm text-gray-500 italic text-center py-8 border border-dashed rounded-lg">Belum ada perbaikan diselesaikan.</p>}
+                      <p className="text-xs text-gray-700 italic">"{act.activity}"</p>
+                    </div>
+                  ))}
+                  {dailyActivities.length === 0 && <p className="text-sm text-gray-500 italic text-center py-8">Belum ada jurnal hari ini.</p>}
                 </div>
               </div>
             </div>
           </div>
         )}
+      </div>
+    );
+  };
+
+  const HistoriPerbaikan = () => {
+    const availableMachines = getAvailableMachines();
+    const allBreakdowns = breakdowns.filter(b => availableMachines.find(m => m.id === b.machineId)).slice().reverse();
+
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold text-gray-800">Histori & Rincian Perbaikan Mesin</h2>
+        
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
+          <table className="w-full text-sm border-collapse min-w-[900px]">
+             <thead>
+               <tr className="bg-gray-100 text-left">
+                 <th className="p-3 border-b font-semibold text-gray-700">Aset Mesin & Pelapor</th>
+                 <th className="p-3 border-b font-semibold text-gray-700">Waktu Lapor</th>
+                 <th className="p-3 border-b font-semibold text-gray-700 w-1/4">Keluhan & Tindakan</th>
+                 <th className="p-3 border-b font-semibold text-gray-700 text-center">Waktu Pengerjaan</th>
+                 <th className="p-3 border-b font-semibold text-gray-700 text-center">Durasi (Downtime)</th>
+                 {currentUser.role === 'admin' && <th className="p-3 border-b font-semibold text-gray-700 text-center">Aksi</th>}
+               </tr>
+             </thead>
+             <tbody>
+               {allBreakdowns.map(b => {
+                 const machine = machines.find(m => m.id === b.machineId);
+                 const durasi = calculateDowntime(b.startTime, b.endTime);
+                 const isSelesai = b.status === 'Selesai Diperbaiki';
+
+                 return (
+                   <tr key={b.id} className="border-b hover:bg-gray-50">
+                     <td className="p-3">
+                       <p className="font-bold text-gray-900">{machine?.name}</p>
+                       <p className="text-[10px] text-gray-500 font-bold uppercase">{machine?.factory}</p>
+                       <p className="text-xs text-blue-600 mt-1"><i className="fa-solid fa-user-tag mr-1"></i> {b.requestBy || b.reportedBy}</p>
+                     </td>
+                     <td className="p-3 text-xs text-gray-600 font-medium">{b.date}</td>
+                     <td className="p-3">
+                        <div className="mb-1 text-xs">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold text-white uppercase mr-1 ${isSelesai ? 'bg-green-500' : 'bg-red-500'}`}>{b.status}</span>
+                        </div>
+                        <p className="text-xs italic text-gray-700 bg-red-50 p-1.5 rounded border border-red-100 mb-1">"{b.description}"</p>
+                        {isSelesai && <p className="text-xs text-gray-800 bg-green-50 p-1.5 rounded border border-green-100"><strong>Act:</strong> {b.analysis}</p>}
+                     </td>
+                     <td className="p-3 text-center">
+                       {isSelesai ? (
+                          <div className="text-[10px]">
+                             <p className="font-bold text-gray-800 border-b pb-1 mb-1">{b.resolvedBy}</p>
+                             <p className="text-green-700 font-bold">Mulai: {b.startTime?.split(' ')[1] || '-'}</p>
+                             <p className="text-gray-600 font-bold">Selesai: {b.endTime?.split(' ')[1] || '-'}</p>
+                          </div>
+                       ) : <span className="text-xs italic text-gray-400">Menunggu Teknisi...</span>}
+                     </td>
+                     <td className="p-3 text-center">
+                        {isSelesai ? (
+                          <span className="font-black text-blue-700 bg-blue-100 px-2 py-1 rounded-lg border border-blue-200">{durasi}</span>
+                        ) : '-'}
+                     </td>
+                     {currentUser.role === 'admin' && (
+                       <td className="p-3 text-center">
+                         <button onClick={() => handleDeleteBreakdown(b.id, machine?.name)} className="text-red-500 hover:text-white hover:bg-red-500 bg-red-50 px-3 py-2 rounded border border-red-200 transition-colors" title="Hapus Data"><i className="fa-solid fa-trash-can"></i></button>
+                       </td>
+                     )}
+                   </tr>
+                 )
+               })}
+               {allBreakdowns.length === 0 && <tr><td colSpan={currentUser.role === 'admin' ? 6 : 5} className="p-6 text-center text-gray-400">Belum ada riwayat perbaikan.</td></tr>}
+             </tbody>
+          </table>
+        </div>
       </div>
     );
   };
@@ -1448,7 +1543,12 @@ export default function App() {
                   <div key={b.id} className={`p-4 border rounded-xl shadow-sm ${b.status === 'Open' ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'}`}>
                     <div className="flex justify-between items-start mb-2">
                       <span className="font-bold text-gray-900">{machine?.name}</span>
-                      <span className={`text-[10px] px-2 py-1 rounded-full font-bold uppercase ${b.status === 'Open' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{b.status}</span>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] px-2 py-1 rounded-full font-bold uppercase ${b.status === 'Open' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{b.status}</span>
+                        {b.status === 'Open' && (
+                          <button onClick={() => handleDeleteBreakdown(b.id, machine?.name)} title="Batalkan Request" className="text-red-500 hover:text-red-700"><i className="fa-solid fa-trash"></i></button>
+                        )}
+                      </div>
                     </div>
                     <div className="bg-white p-3 rounded border text-sm text-gray-700 mb-2 italic">"{b.description}"</div>
                     
@@ -2315,6 +2415,7 @@ export default function App() {
               <NavItem id="kelola_mesin" icon="fa-network-wired" label="Aset & Parameter" roles={['admin']} />
               <NavItem id="kelola_sparepart" icon="fa-boxes-stacked" label="Manajemen Sparepart" roles={['admin']} />
               <NavItem id="setup_pm" icon="fa-calendar-days" label="Jadwal & Verifikasi PM" roles={['admin']} />
+              <NavItem id="histori_perbaikan" icon="fa-clock-rotate-left" label="Histori Perbaikan" roles={['admin']} />
               <NavItem id="cetak" icon="fa-print" label="Pusat Dokumen (Cetak)" roles={['admin']} />
               <NavItem id="info_kpi" icon="fa-circle-info" label="Cara Penghitungan KPI" roles={['admin']} />
             </div>
@@ -2323,6 +2424,7 @@ export default function App() {
               <NavItem id="daily_activity" icon="fa-book-open" label="Buku Jurnal Harian" roles={['teknisi']} />
               <NavItem id="cek_harian" icon="fa-clipboard-list" label="Checklist Rutin Mesin" roles={['teknisi']} />
               <NavItem id="penanganan_rusak" icon="fa-screwdriver-wrench" label="Tangani Breakdown" roles={['teknisi']} />
+              <NavItem id="histori_perbaikan" icon="fa-clock-rotate-left" label="Histori Perbaikan" roles={['teknisi']} />
               <NavItem id="eksekusi_pm" icon="fa-business-time" label="Jadwal PM Aktif" roles={['teknisi']} />
               <NavItem id="teknisi_sparepart" icon="fa-box-open" label="Gudang & Request Part" roles={['teknisi']} />
               <NavItem id="info_kpi" icon="fa-circle-info" label="Cara Penghitungan KPI" roles={['teknisi']} />
@@ -2360,7 +2462,7 @@ export default function App() {
                    </div>
                    <div className="max-h-80 overflow-y-auto">
                       {notifications.length > 0 ? notifications.map((n, idx) => (
-                         <div key={idx} onClick={() => { setActiveMenu(n.action); setIsNotifOpen(false); }} className="p-3 border-b border-gray-100 hover:bg-blue-50 cursor-pointer flex gap-3 items-start transition-colors">
+                         <div key={idx} onClick={() => { setActiveMenu(n.action); setIsNotifOpen(false); }} className="p-3 border-b border-gray-100 hover:bg-blue-50 cursor-pointer flex gap-3 items-start transition-colors relative pr-8">
                             <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white ${n.type==='alert'?'bg-red-500':n.type==='warning'?'bg-orange-500':n.type==='success'?'bg-green-500':'bg-blue-500'}`}>
                                <i className={`fa-solid ${n.type==='alert'?'fa-triangle-exclamation':n.type==='warning'?'fa-box':n.type==='success'?'fa-check':'fa-info'}`}></i>
                             </div>
@@ -2368,6 +2470,9 @@ export default function App() {
                                <p className="text-xs font-bold text-gray-900">{n.title}</p>
                                <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{n.text}</p>
                             </div>
+                            <button onClick={(e) => { e.stopPropagation(); setDismissedNotifs([...dismissedNotifs, n.id]); }} className="absolute right-3 top-3 text-gray-400 hover:text-red-500" title="Tutup">
+                               <i className="fa-solid fa-xmark"></i>
+                            </button>
                          </div>
                       )) : (
                          <div className="p-6 text-center text-gray-400">
@@ -2391,6 +2496,7 @@ export default function App() {
              {activeMenu === 'kelola_mesin' && <AdminKelolaMesin />}
              {activeMenu === 'kelola_sparepart' && <AdminKelolaSparepart />}
              {activeMenu === 'setup_pm' && <SetupPM />}
+             {activeMenu === 'histori_perbaikan' && <HistoriPerbaikan />}
              {activeMenu === 'cetak' && <CetakLaporan />}
              {activeMenu === 'info_kpi' && <InfoKPI />}
              {activeMenu === 'daily_activity' && <TeknisiDailyActivity />}
