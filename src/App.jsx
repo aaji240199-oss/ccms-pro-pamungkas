@@ -28,7 +28,6 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [dialog, setDialog] = useState(null);
   
-  // States Baru: Notifikasi & Scanner
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
 
@@ -45,6 +44,7 @@ export default function App() {
   const [spareparts, setSpareparts] = useState([]);
   const [sparepartLogs, setSparepartLogs] = useState([]);
   const [sparepartRequests, setSparepartRequests] = useState([]);
+  const [ltiLogs, setLtiLogs] = useState([]); // State Baru untuk LTI
 
   // --- EFFECT: LOAD FONTAWESOME & FIREBASE AUTH ---
   useEffect(() => {
@@ -92,11 +92,12 @@ export default function App() {
     const unsubSpareparts = onSnapshot(getPath('cmms_spareparts'), handleSnap(setSpareparts), handleErr);
     const unsubSparepartLogs = onSnapshot(getPath('cmms_sparepart_logs'), handleSnap(setSparepartLogs), handleErr);
     const unsubSparepartRequests = onSnapshot(getPath('cmms_sparepart_requests'), handleSnap(setSparepartRequests), handleErr);
+    const unsubLtiLogs = onSnapshot(getPath('cmms_lti_logs'), handleSnap(setLtiLogs), handleErr); // Sync LTI
 
     return () => {
       unsubFactories(); unsubUsers(); unsubMachines(); unsubDailyParams();
       unsubDailyChecks(); unsubBreakdowns(); unsubPmSchedules(); unsubPmParams(); unsubDailyActivities();
-      unsubSpareparts(); unsubSparepartLogs(); unsubSparepartRequests();
+      unsubSpareparts(); unsubSparepartLogs(); unsubSparepartRequests(); unsubLtiLogs();
     };
   }, [fbUser]);
 
@@ -130,7 +131,7 @@ export default function App() {
          notifs.push({ id: b.id, title: 'Mesin Selesai', text: `Perbaikan mesin telah selesai.`, type: 'success', action: 'req_perbaikan' });
       });
     }
-    setNotifications(notifs.slice(0, 8)); // Ambil maks 8 notif
+    setNotifications(notifs.slice(0, 8));
   }, [breakdowns, sparepartRequests, pmSchedules, currentUser, machines]);
 
 
@@ -171,7 +172,6 @@ export default function App() {
 
   const handleLogout = () => setCurrentUser(null);
 
-  // --- KOMPONEN UI UTAMA ---
   const ModalDialog = () => {
     if (!dialog) return null;
     return (
@@ -195,60 +195,33 @@ export default function App() {
     );
   };
 
-  // --- FITUR SCANNER QR (MENGGUNAKAN KAMERA ASLI VIA CDN) ---
   const BarcodeScannerModal = ({ onScanSuccess, onClose }) => {
     const [scriptLoaded, setScriptLoaded] = useState(false);
-
     useEffect(() => {
-      // Jika sudah pernah load, langsung render
-      if (window.Html5QrcodeScanner) {
-        setScriptLoaded(true);
-        return;
-      }
-      
-      // Load library secara dinamis agar tidak perlu npm install
+      if (window.Html5QrcodeScanner) { setScriptLoaded(true); return; }
       const script = document.createElement('script');
       script.src = 'https://unpkg.com/html5-qrcode';
       script.async = true;
       script.onload = () => setScriptLoaded(true);
       document.body.appendChild(script);
     }, []);
-
     useEffect(() => {
       if (!scriptLoaded) return;
-      
-      const html5QrcodeScanner = new window.Html5QrcodeScanner(
-        "reader",
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        false
-      );
-      
+      const html5QrcodeScanner = new window.Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 250 } }, false);
       html5QrcodeScanner.render(
-        (decodedText) => {
-          html5QrcodeScanner.clear();
-          onScanSuccess(decodedText);
-        },
-        (error) => { /* Abaikan error minor pencarian fokus kamera */ }
+        (decodedText) => { html5QrcodeScanner.clear(); onScanSuccess(decodedText); },
+        (error) => {}
       );
-
-      return () => { 
-        html5QrcodeScanner.clear().catch(e => console.error(e)); 
-      };
+      return () => { html5QrcodeScanner.clear().catch(e => console.error(e)); };
     }, [scriptLoaded, onScanSuccess]);
-
     return (
       <div className="fixed inset-0 bg-black bg-opacity-75 z-[100] flex flex-col items-center justify-center p-4">
         <div className="bg-white w-full max-w-md p-4 rounded-xl shadow-2xl relative">
-           <button onClick={onClose} className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-8 h-8 font-bold flex items-center justify-center z-10">
-             <i className="fa-solid fa-xmark"></i>
-           </button>
+           <button onClick={onClose} className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-8 h-8 font-bold flex items-center justify-center z-10"><i className="fa-solid fa-xmark"></i></button>
            <h3 className="text-center font-bold mb-4 text-gray-800 border-b pb-2">Arahkan Kamera ke QR Mesin</h3>
-           
            {!scriptLoaded && <p className="text-center text-sm text-blue-600 animate-pulse font-bold my-8">Menghidupkan Kamera...</p>}
-           
            <div id="reader" className="w-full overflow-hidden rounded-lg"></div>
-           
-           <p className="text-[10px] text-center text-gray-500 mt-4 italic">* Pastikan Anda memberikan izin akses kamera (Allow Camera) pada browser HP.</p>
+           <p className="text-[10px] text-center text-gray-500 mt-4 italic">* Pastikan Anda memberikan izin akses kamera.</p>
         </div>
       </div>
     );
@@ -262,11 +235,9 @@ export default function App() {
           <div className="flex justify-center mb-6">
             <div className="bg-blue-600 w-16 h-16 rounded-full flex items-center justify-center shadow-lg"><i className="fa-solid fa-gear text-white text-3xl"></i></div>
           </div>
-          <h2 className="text-2xl font-bold text-center mb-2 text-gray-800">CMMS System</h2>
+          <h2 className="text-2xl font-bold text-center mb-2 text-gray-800">CMMS Pro</h2>
           <p className="text-gray-500 text-center mb-6 text-sm">Sistem Manajemen Pemeliharaan</p>
-          
-          {!isDbLoaded ? (
-             <p className="text-center text-blue-600 font-bold p-4 animate-pulse">Menghubungkan ke Database...</p>
+          {!isDbLoaded ? ( <p className="text-center text-blue-600 font-bold p-4 animate-pulse">Menghubungkan ke Database...</p>
           ) : users.length === 0 ? (
             <div className="text-center p-4 bg-yellow-50 border border-yellow-200 rounded-lg mb-4">
               <p className="text-yellow-800 text-sm mb-3 font-bold">Database masih kosong!</p>
@@ -290,24 +261,85 @@ export default function App() {
     );
   }
 
+  // --- KOMPONEN DASHBOARD & KPI ---
   const Dashboard = () => {
+    const [viewMode, setViewMode] = useState('overview'); // overview, monthly, yearly
+    const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+    const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString()); // YYYY
+
     const availableMachines = getAvailableMachines();
     const openBreakdowns = breakdowns.filter(b => b.status === 'Open' && availableMachines.find(m => m.id === b.machineId));
     const resolvedBreakdowns = breakdowns.filter(b => b.status === 'Selesai Diperbaiki' && availableMachines.find(m => m.id === b.machineId));
     const pendingPMs = pmSchedules.filter(s => s.status === 'Pending' && availableMachines.find(m => m.id === s.machineId));
     
-    // Logic untuk Grafik Visual Sederhana (HTML/CSS)
+    // --- Logika Filter Data untuk KPI ---
+    const filterByDate = (dateString, periodStr, isYearly) => {
+      if(!dateString) return false;
+      if (isYearly) return dateString.includes(periodStr);
+      
+      // Handle Format Bulanan (YYYY-MM vs M/D/YYYY)
+      const [y, m] = periodStr.split('-');
+      const mNoZero = parseInt(m, 10).toString();
+      return dateString.startsWith(periodStr) || 
+             (dateString.includes(`${mNoZero}/`) && dateString.includes(y)) || 
+             (dateString.includes(`${m}/`) && dateString.includes(y));
+    };
+
+    const isYearly = viewMode === 'yearly';
+    const periodStr = isYearly ? selectedYear : selectedMonth;
+    
+    // 1. Data Filtered Breakdown & PM
+    const periodBreakdowns = breakdowns.filter(b => availableMachines.find(m => m.id === b.machineId) && filterByDate(b.date, periodStr, isYearly));
+    const periodPMs = pmSchedules.filter(s => availableMachines.find(m => m.id === s.machineId) && filterByDate(s.date, periodStr, isYearly));
+    
+    // 2. Hitung LTI (Manual Input)
+    const periodLTI = ltiLogs.filter(l => l.factory === (currentUser.factory === 'All' ? l.factory : currentUser.factory) && l.period === periodStr)
+                             .reduce((sum, log) => sum + Number(log.count), 0);
+
+    const handleInputLTI = async () => {
+       const val = window.prompt(`Masukkan jumlah Kejadian LTI (Kecelakaan Kerja) untuk periode ${periodStr}:`, "0");
+       if(val !== null && !isNaN(val) && val.trim() !== '') {
+          await addDoc(colRef('cmms_lti_logs'), { period: periodStr, count: Number(val), factory: currentUser.factory === 'All' ? factories[0]?.name : currentUser.factory, recordedBy: currentUser.name, timestamp: new Date().toISOString() });
+          showMessage('Tersimpan', 'Data LTI berhasil ditambahkan.', 'success');
+       }
+    };
+
+    // 3. Hitung MTTR (Hours)
+    let totalRepairHours = 0;
+    let resolvedCount = 0;
+    periodBreakdowns.forEach(b => {
+      if(b.status === 'Selesai Diperbaiki' && b.startTime && b.endTime) {
+         const start = new Date(b.startTime);
+         const end = new Date(b.endTime);
+         if(!isNaN(start) && !isNaN(end)) {
+           const diff = (end - start) / (1000 * 60 * 60);
+           if(diff > 0) { totalRepairHours += diff; resolvedCount++; }
+         }
+      }
+    });
+    const kpiMTTR = resolvedCount > 0 ? (totalRepairHours / resolvedCount).toFixed(1) : 0;
+
+    // 4. Hitung MTBF (Hours)
+    const daysInPeriod = isYearly ? 365 : 30; // Asumsi standar
+    const totalMachineHours = availableMachines.length * (daysInPeriod * 24); // Asumsi pabrik 24/7
+    const totalFailures = periodBreakdowns.length;
+    const kpiMTBF = totalFailures > 0 ? (totalMachineHours / totalFailures).toFixed(0) : totalMachineHours;
+
+    // 5. Hitung PM Completion
+    const totalScheduledPM = periodPMs.length;
+    const completedPM = periodPMs.filter(p => p.status === 'Selesai' || p.status === 'Terverifikasi').length;
+    const kpiPM = totalScheduledPM > 0 ? Math.round((completedPM / totalScheduledPM) * 100) : 100;
+
+    // 6. Hitung Backlog
+    const kpiBacklog = periodBreakdowns.filter(b => b.status === 'Open').length;
+
+    // --- Overview Chart Logic ---
     const machineErrorCounts = {};
     breakdowns.filter(b => availableMachines.find(m => m.id === b.machineId)).forEach(b => {
        const mName = machines.find(m => m.id === b.machineId)?.name || 'Unknown';
        machineErrorCounts[mName] = (machineErrorCounts[mName] || 0) + 1;
     });
-    
-    const sortedBadActors = Object.keys(machineErrorCounts)
-       .map(key => ({ name: key, jumlah: machineErrorCounts[key] }))
-       .sort((a, b) => b.jumlah - a.jumlah)
-       .slice(0, 5); // Ambil 5 Teratas
-       
+    const sortedBadActors = Object.keys(machineErrorCounts).map(key => ({ name: key, jumlah: machineErrorCounts[key] })).sort((a, b) => b.jumlah - a.jumlah).slice(0, 5);
     const maxErrors = sortedBadActors.length > 0 ? sortedBadActors[0].jumlah : 1;
     const totalMesin = availableMachines.length;
     const mesinRusak = new Set(openBreakdowns.map(b => b.machineId)).size;
@@ -315,76 +347,194 @@ export default function App() {
 
     return (
       <div className="space-y-6">
-        <h2 className="text-2xl font-bold text-gray-800">Dashboard Utama</h2>
-        
-        {/* Metric Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-          <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-500 flex items-center">
-            <div className="bg-blue-100 p-3 rounded-full mr-4"><i className="fa-solid fa-industry text-blue-600 text-xl w-6 text-center"></i></div>
-            <div><p className="text-sm text-gray-500 font-medium">Total Mesin</p><p className="text-2xl font-bold text-gray-800">{availableMachines.length}</p></div>
-          </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-red-500 flex items-center">
-            <div className="bg-red-100 p-3 rounded-full mr-4"><i className="fa-solid fa-triangle-exclamation text-red-600 text-xl w-6 text-center"></i></div>
-            <div><p className="text-sm text-gray-500 font-medium">Request Pending</p><p className="text-2xl font-bold text-gray-800">{openBreakdowns.length}</p></div>
-          </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-indigo-500 flex items-center">
-            <div className="bg-indigo-100 p-3 rounded-full mr-4"><i className="fa-solid fa-wrench text-indigo-600 text-xl w-6 text-center"></i></div>
-            <div><p className="text-sm text-gray-500 font-medium">Mesin Diperbaiki</p><p className="text-2xl font-bold text-gray-800">{resolvedBreakdowns.length}</p></div>
-          </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-green-500 flex items-center">
-            <div className="bg-green-100 p-3 rounded-full mr-4"><i className="fa-solid fa-calendar-check text-green-600 text-xl w-6 text-center"></i></div>
-            <div><p className="text-sm text-gray-500 font-medium">Jadwal PM</p><p className="text-2xl font-bold text-gray-800">{pendingPMs.length}</p></div>
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
+          <h2 className="text-2xl font-bold text-gray-800">Pusat Informasi Dashboard</h2>
+          <div className="bg-gray-200 p-1 rounded-lg flex space-x-1 w-full md:w-auto">
+            <button onClick={()=>setViewMode('overview')} className={`flex-1 md:flex-none px-4 py-2 text-sm font-bold rounded-md transition-colors ${viewMode === 'overview' ? 'bg-white shadow text-gray-800' : 'text-gray-500'}`}>Overview</button>
+            <button onClick={()=>setViewMode('monthly')} className={`flex-1 md:flex-none px-4 py-2 text-sm font-bold rounded-md transition-colors ${viewMode === 'monthly' ? 'bg-blue-600 shadow text-white' : 'text-gray-500'}`}>KPI Bulanan</button>
+            <button onClick={()=>setViewMode('yearly')} className={`flex-1 md:flex-none px-4 py-2 text-sm font-bold rounded-md transition-colors ${viewMode === 'yearly' ? 'bg-indigo-600 shadow text-white' : 'text-gray-500'}`}>KPI Tahunan</button>
           </div>
         </div>
 
-        {/* Visual Charts Sederhana (HTML & CSS Only) */}
-        {['admin', 'teknisi'].includes(currentUser.role) && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-             <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
-                <h3 className="font-bold text-gray-800 mb-4 border-b pb-2">Kesehatan Mesin (Availability)</h3>
-                <div className="flex flex-col justify-center items-center py-6">
-                   <div className="w-full bg-gray-200 rounded-full h-8 mb-4 overflow-hidden relative">
-                     <div className="bg-green-500 h-8 flex items-center justify-end pr-2 text-white font-bold text-xs" style={{ width: `${persentaseSehat}%` }}>
-                       {persentaseSehat > 10 && `${persentaseSehat}% SEHAT`}
-                     </div>
-                   </div>
-                   <div className="flex justify-between w-full text-sm text-gray-600 font-medium px-2">
-                     <span>{totalMesin - mesinRusak} Mesin Beroperasi</span>
-                     <span className="text-red-500">{mesinRusak} Mesin Breakdown</span>
-                   </div>
+        {viewMode === 'overview' && (
+          <div className="space-y-6 animate-[fadeIn_0.3s]">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+              <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-500 flex items-center">
+                <div className="bg-blue-100 p-3 rounded-full mr-4"><i className="fa-solid fa-industry text-blue-600 text-xl w-6 text-center"></i></div>
+                <div><p className="text-sm text-gray-500 font-medium">Total Mesin</p><p className="text-2xl font-bold text-gray-800">{availableMachines.length}</p></div>
+              </div>
+              <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-red-500 flex items-center">
+                <div className="bg-red-100 p-3 rounded-full mr-4"><i className="fa-solid fa-triangle-exclamation text-red-600 text-xl w-6 text-center"></i></div>
+                <div><p className="text-sm text-gray-500 font-medium">Request Pending</p><p className="text-2xl font-bold text-gray-800">{openBreakdowns.length}</p></div>
+              </div>
+              <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-indigo-500 flex items-center">
+                <div className="bg-indigo-100 p-3 rounded-full mr-4"><i className="fa-solid fa-wrench text-indigo-600 text-xl w-6 text-center"></i></div>
+                <div><p className="text-sm text-gray-500 font-medium">Mesin Diperbaiki</p><p className="text-2xl font-bold text-gray-800">{resolvedBreakdowns.length}</p></div>
+              </div>
+              <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-green-500 flex items-center">
+                <div className="bg-green-100 p-3 rounded-full mr-4"><i className="fa-solid fa-calendar-check text-green-600 text-xl w-6 text-center"></i></div>
+                <div><p className="text-sm text-gray-500 font-medium">Jadwal PM</p><p className="text-2xl font-bold text-gray-800">{pendingPMs.length}</p></div>
+              </div>
+            </div>
+
+            {['admin', 'teknisi'].includes(currentUser.role) && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                 <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+                    <h3 className="font-bold text-gray-800 mb-4 border-b pb-2">Kesehatan Mesin Realtime</h3>
+                    <div className="flex flex-col justify-center items-center py-6">
+                       <div className="w-full bg-gray-200 rounded-full h-8 mb-4 overflow-hidden relative">
+                         <div className="bg-green-500 h-8 flex items-center justify-end pr-2 text-white font-bold text-xs transition-all duration-1000" style={{ width: `${persentaseSehat}%` }}>
+                           {persentaseSehat > 10 && `${persentaseSehat}% SEHAT`}
+                         </div>
+                       </div>
+                       <div className="flex justify-between w-full text-sm text-gray-600 font-medium px-2">
+                         <span>{totalMesin - mesinRusak} Mesin Operasi</span>
+                         <span className="text-red-500">{mesinRusak} Mesin Breakdown</span>
+                       </div>
+                    </div>
+                 </div>
+
+                 <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+                    <h3 className="font-bold text-gray-800 mb-4 border-b pb-2">Top 5 Sering Rusak (All Time)</h3>
+                    <div className="space-y-3">
+                       {sortedBadActors.length > 0 ? sortedBadActors.map((actor, idx) => {
+                          const barWidth = Math.max((actor.jumlah / maxErrors) * 100, 10);
+                          return (
+                            <div key={idx} className="flex flex-col text-sm">
+                               <div className="flex justify-between mb-1">
+                                 <span className="font-bold text-gray-700">{actor.name}</span>
+                                 <span className="text-gray-500">{actor.jumlah}x Rusak</span>
+                               </div>
+                               <div className="w-full bg-gray-100 rounded-full h-3">
+                                 <div className="bg-blue-500 h-3 rounded-full" style={{ width: `${barWidth}%` }}></div>
+                               </div>
+                            </div>
+                          )
+                       }) : <p className="text-center text-sm text-gray-400 py-6">Belum ada riwayat kerusakan.</p>}
+                    </div>
+                 </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {(viewMode === 'monthly' || viewMode === 'yearly') && (
+          <div className="space-y-6 animate-[fadeIn_0.3s]">
+             <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col md:flex-row items-start md:items-end justify-between gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Pilih Periode {isYearly ? 'Tahun' : 'Bulan'}</label>
+                  {isYearly ? (
+                     <select className="border-2 p-3 rounded-lg font-bold text-lg text-indigo-700 w-48" value={selectedYear} onChange={e=>setSelectedYear(e.target.value)}>
+                       {[...Array(5)].map((_, i) => { const y = new Date().getFullYear() - i; return <option key={y} value={y}>{y}</option> })}
+                     </select>
+                  ) : (
+                     <input type="month" className="border-2 p-3 rounded-lg font-bold text-lg text-blue-700 w-48" value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)} />
+                  )}
+                </div>
+                <div className="bg-gray-50 px-4 py-2 rounded-lg border text-sm text-gray-600">
+                  Total Breakdown: <strong className="text-gray-900">{totalFailures}</strong> | Total PM: <strong className="text-gray-900">{totalScheduledPM}</strong>
                 </div>
              </div>
 
-             <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
-                <h3 className="font-bold text-gray-800 mb-4 border-b pb-2">Top 5 Mesin Sering Rusak</h3>
-                <div className="space-y-3">
-                   {sortedBadActors.length > 0 ? sortedBadActors.map((actor, idx) => {
-                      const barWidth = Math.max((actor.jumlah / maxErrors) * 100, 10);
-                      return (
-                        <div key={idx} className="flex flex-col text-sm">
-                           <div className="flex justify-between mb-1">
-                             <span className="font-bold text-gray-700">{actor.name}</span>
-                             <span className="text-gray-500">{actor.jumlah}x Rusak</span>
-                           </div>
-                           <div className="w-full bg-gray-100 rounded-full h-3">
-                             <div className="bg-blue-500 h-3 rounded-full" style={{ width: `${barWidth}%` }}></div>
-                           </div>
-                        </div>
-                      )
-                   }) : <p className="text-center text-sm text-gray-400 py-6">Belum ada riwayat kerusakan.</p>}
+             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                {/* MTBF Card */}
+                <div className="bg-white p-6 rounded-xl shadow-md border-t-8 border-green-500">
+                   <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">MTBF</p>
+                        <p className="text-xs text-gray-400 mt-1">Mean Time Between Failures</p>
+                      </div>
+                      <i className="fa-solid fa-stopwatch text-3xl text-green-200"></i>
+                   </div>
+                   <div className="flex items-baseline gap-2">
+                     <span className="text-4xl md:text-5xl font-black text-gray-800">{kpiMTBF}</span>
+                     <span className="text-lg font-bold text-gray-500">Jam</span>
+                   </div>
+                   <p className="text-[10px] text-gray-400 mt-4 leading-tight">*Rata-rata waktu keandalan mesin beroperasi sebelum mengalami kerusakan dalam periode ini.</p>
+                </div>
+
+                {/* MTTR Card */}
+                <div className="bg-white p-6 rounded-xl shadow-md border-t-8 border-yellow-500">
+                   <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">MTTR</p>
+                        <p className="text-xs text-gray-400 mt-1">Mean Time To Repair</p>
+                      </div>
+                      <i className="fa-solid fa-tools text-3xl text-yellow-200"></i>
+                   </div>
+                   <div className="flex items-baseline gap-2">
+                     <span className="text-4xl md:text-5xl font-black text-gray-800">{kpiMTTR}</span>
+                     <span className="text-lg font-bold text-gray-500">Jam</span>
+                   </div>
+                   <p className="text-[10px] text-gray-400 mt-4 leading-tight">*Rata-rata durasi kecepatan teknisi menyelesaikan perbaikan mesin sejak mesin mati.</p>
+                </div>
+
+                {/* PM Completion Card */}
+                <div className="bg-white p-6 rounded-xl shadow-md border-t-8 border-blue-500">
+                   <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">PM Selesai</p>
+                        <p className="text-xs text-gray-400 mt-1">Preventive Completion Rate</p>
+                      </div>
+                      <i className="fa-solid fa-calendar-check text-3xl text-blue-200"></i>
+                   </div>
+                   <div className="flex items-baseline gap-2">
+                     <span className="text-4xl md:text-5xl font-black text-blue-600">{kpiPM}</span>
+                     <span className="text-lg font-bold text-blue-400">%</span>
+                   </div>
+                   <div className="w-full bg-gray-200 rounded-full h-2 mt-4">
+                     <div className={`h-2 rounded-full ${kpiPM < 80 ? 'bg-red-500' : 'bg-blue-500'}`} style={{ width: `${kpiPM}%` }}></div>
+                   </div>
+                   <p className="text-[10px] text-gray-400 mt-2 leading-tight">Terlaksana: {completedPM} dari {totalScheduledPM} Jadwal PM.</p>
+                </div>
+
+                {/* Backlog Work Order Card */}
+                <div className="bg-white p-6 rounded-xl shadow-md border-t-8 border-orange-500">
+                   <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">Backlog WO</p>
+                        <p className="text-xs text-gray-400 mt-1">Work Order / Tiket Menggantung</p>
+                      </div>
+                      <i className="fa-solid fa-clipboard-list text-3xl text-orange-200"></i>
+                   </div>
+                   <div className="flex items-baseline gap-2">
+                     <span className="text-4xl md:text-5xl font-black text-orange-600">{kpiBacklog}</span>
+                     <span className="text-lg font-bold text-gray-500">Tiket</span>
+                   </div>
+                   <p className="text-[10px] text-gray-400 mt-4 leading-tight">*Jumlah permintaan perbaikan yang masuk namun belum selesai dikerjakan teknisi di periode ini.</p>
+                </div>
+
+                {/* LTI Card */}
+                <div className="bg-white p-6 rounded-xl shadow-md border-t-8 border-red-600 relative overflow-hidden">
+                   <div className="absolute -right-4 -bottom-4 opacity-5"><i className="fa-solid fa-truck-medical text-9xl"></i></div>
+                   <div className="flex justify-between items-start mb-4 relative z-10">
+                      <div>
+                        <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">Insiden LTI</p>
+                        <p className="text-xs text-gray-400 mt-1">Lost Time Incident (Kecelakaan)</p>
+                      </div>
+                      {['admin', 'teknisi'].includes(currentUser.role) && (
+                        <button onClick={handleInputLTI} className="bg-red-100 text-red-700 hover:bg-red-200 px-3 py-1 rounded text-[10px] font-bold border border-red-200">+ Catat LTI</button>
+                      )}
+                   </div>
+                   <div className="flex items-baseline gap-2 relative z-10">
+                     <span className="text-4xl md:text-5xl font-black text-red-600">{periodLTI}</span>
+                     <span className="text-lg font-bold text-gray-500">Kejadian</span>
+                   </div>
+                   <p className="text-[10px] text-gray-400 mt-4 leading-tight relative z-10">*Kecelakaan kerja yang menyebabkan teknisi/operator kehilangan waktu kerja (Target standard: 0 Kejadian).</p>
                 </div>
              </div>
           </div>
         )}
-        
+
         <div className="bg-gradient-to-r from-blue-50 to-white p-5 md:p-6 rounded-xl shadow-sm mb-6 border border-blue-100">
           <h3 className="text-lg font-semibold mb-1 text-blue-900">Selamat Datang, {currentUser.name}</h3>
           <p className="text-gray-600 text-sm">Anda login sebagai <strong>{currentUser.role.toUpperCase()}</strong>. Lingkup operasional: <span className="bg-blue-200 text-blue-800 px-2 py-0.5 rounded font-bold">{currentUser.factory}</span>.</p>
         </div>
 
-        {currentUser.role === 'admin' && (
-          <div className="space-y-6">
-            <h3 className="text-xl font-bold text-gray-800 border-b pb-2"><i className="fa-solid fa-desktop mr-2 text-gray-500"></i> Panel Monitoring Admin</h3>
+        {/* ... (Sisa panel monitoring Admin tidak berubah, langsung diteruskan) ... */}
+        {currentUser.role === 'admin' && viewMode === 'overview' && (
+          <div className="space-y-6 animate-[fadeIn_0.3s]">
+            <h3 className="text-xl font-bold text-gray-800 border-b pb-2"><i className="fa-solid fa-desktop mr-2 text-gray-500"></i> Panel Log Aktivitas</h3>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               
               <div className="bg-white p-5 rounded-xl shadow-sm border border-red-100">
@@ -666,7 +816,6 @@ export default function App() {
       setSelectedMachineParams(null);
     };
 
-    // --- FITUR GENERATOR / CETAK QR MESIN ---
     const handlePrintQR = (machine) => {
       const printWindow = window.open('', '_blank');
       const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(machine.code)}`;
@@ -748,7 +897,6 @@ export default function App() {
                       </div>
                     </div>
                     <div className="flex gap-2 w-full sm:w-auto">
-                       {/* Tombol Cetak QR Mesin */}
                        <button type="button" onClick={() => handlePrintQR(m)} className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-xs px-3 py-2 rounded-lg font-bold border border-indigo-200" title="Cetak Label QR Mesin"><i className="fa-solid fa-qrcode"></i></button>
                        <button type="button" onClick={() => handleSelectMachineParams(m.id)} className="flex-1 sm:flex-none bg-gray-800 hover:bg-black text-white text-xs px-3 py-2 rounded-lg font-bold">Setup Cek</button>
                        <button type="button" onClick={() => handleDeleteMachine(m.id, m.name)} className="bg-red-100 hover:bg-red-200 text-red-600 text-xs px-3 py-2 rounded-lg font-bold border border-red-200"><i className="fa-solid fa-trash"></i></button>
@@ -1877,7 +2025,6 @@ export default function App() {
     <div className="min-h-screen bg-gray-50 flex text-gray-900 font-sans">
       <ModalDialog />
       
-      {/* Sidebar Overlay Mobile */}
       {isSidebarOpen && <div className="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden print:hidden" onClick={() => setIsSidebarOpen(false)}></div>}
       
       <aside className={`print:hidden fixed inset-y-0 left-0 bg-gray-900 text-white w-72 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-transform z-30 flex flex-col shadow-2xl`}>
@@ -1894,7 +2041,7 @@ export default function App() {
             </div>
           </div>
           <nav className="space-y-1">
-            <NavItem id="dashboard" icon="fa-chart-pie" label="Dashboard" roles={['admin', 'teknisi', 'user']} />
+            <NavItem id="dashboard" icon="fa-chart-pie" label="Dashboard & KPI" roles={['admin', 'teknisi', 'user']} />
             <div className={currentUser.role === 'admin' ? 'pt-4 pb-2' : 'hidden'}>
               <p className="text-[10px] font-bold text-gray-500 uppercase px-4 mb-2">Manajemen Admin</p>
               <NavItem id="kelola_pabrik" icon="fa-city" label="Master Pabrik / Lokasi" roles={['admin']} />
