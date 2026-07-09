@@ -31,7 +31,6 @@ export default function App() {
   // States Baru: Notifikasi & Scanner
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
-  const [showScanner, setShowScanner] = useState(false);
 
   // --- STATES: DATABASE ---
   const [factories, setFactories] = useState([]);
@@ -196,33 +195,61 @@ export default function App() {
     );
   };
 
-  // Komponen Simulasi Scanner
-  const SimulatedQRScanner = ({ onScanSuccess, onClose }) => {
-    const availableMachines = getAvailableMachines();
+  // --- FITUR SCANNER QR (MENGGUNAKAN KAMERA ASLI VIA CDN) ---
+  const BarcodeScannerModal = ({ onScanSuccess, onClose }) => {
+    const [scriptLoaded, setScriptLoaded] = useState(false);
+
+    useEffect(() => {
+      // Jika sudah pernah load, langsung render
+      if (window.Html5QrcodeScanner) {
+        setScriptLoaded(true);
+        return;
+      }
+      
+      // Load library secara dinamis agar tidak perlu npm install
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/html5-qrcode';
+      script.async = true;
+      script.onload = () => setScriptLoaded(true);
+      document.body.appendChild(script);
+    }, []);
+
+    useEffect(() => {
+      if (!scriptLoaded) return;
+      
+      const html5QrcodeScanner = new window.Html5QrcodeScanner(
+        "reader",
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        false
+      );
+      
+      html5QrcodeScanner.render(
+        (decodedText) => {
+          html5QrcodeScanner.clear();
+          onScanSuccess(decodedText);
+        },
+        (error) => { /* Abaikan error minor pencarian fokus kamera */ }
+      );
+
+      return () => { 
+        html5QrcodeScanner.clear().catch(e => console.error(e)); 
+      };
+    }, [scriptLoaded, onScanSuccess]);
+
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-75 z-[100] flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col">
-          <div className="bg-gray-900 text-white p-4 flex justify-between items-center">
-             <h3 className="font-bold"><i className="fa-solid fa-camera mr-2"></i> Simulasi Scanner QR</h3>
-             <button onClick={onClose} className="text-gray-400 hover:text-white"><i className="fa-solid fa-xmark text-xl"></i></button>
-          </div>
-          <div className="p-6 text-center bg-gray-100 flex-1 flex flex-col justify-center items-center">
-             <div className="w-48 h-48 border-4 border-dashed border-blue-400 relative mb-4 bg-gray-200 flex items-center justify-center">
-                <div className="absolute w-full h-1 bg-red-500 shadow-[0_0_10px_red] animate-[scan_2s_ease-in-out_infinite]"></div>
-                <i className="fa-solid fa-qrcode text-6xl text-gray-400 opacity-50"></i>
-             </div>
-             <p className="text-sm text-gray-500 italic mb-4">Arahkan kamera ke QR Code mesin. (Pilih tombol di bawah untuk simulasi scan)</p>
-          </div>
-          <div className="p-4 bg-white border-t space-y-2 max-h-48 overflow-y-auto">
-             <p className="text-xs font-bold text-gray-500 uppercase mb-2">Simulasi Deteksi QR:</p>
-             {availableMachines.length > 0 ? availableMachines.map(m => (
-                <button key={m.id} onClick={() => onScanSuccess(m.code)} className="w-full text-left p-2 border rounded hover:bg-blue-50 text-sm font-medium">
-                  {m.code} - {m.name}
-                </button>
-             )) : <p className="text-sm text-gray-400 italic">Belum ada mesin.</p>}
-          </div>
+      <div className="fixed inset-0 bg-black bg-opacity-75 z-[100] flex flex-col items-center justify-center p-4">
+        <div className="bg-white w-full max-w-md p-4 rounded-xl shadow-2xl relative">
+           <button onClick={onClose} className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-8 h-8 font-bold flex items-center justify-center z-10">
+             <i className="fa-solid fa-xmark"></i>
+           </button>
+           <h3 className="text-center font-bold mb-4 text-gray-800 border-b pb-2">Arahkan Kamera ke QR Mesin</h3>
+           
+           {!scriptLoaded && <p className="text-center text-sm text-blue-600 animate-pulse font-bold my-8">Menghidupkan Kamera...</p>}
+           
+           <div id="reader" className="w-full overflow-hidden rounded-lg"></div>
+           
+           <p className="text-[10px] text-center text-gray-500 mt-4 italic">* Pastikan Anda memberikan izin akses kamera (Allow Camera) pada browser HP.</p>
         </div>
-        <style>{`@keyframes scan { 0% { top: 0; } 50% { top: 100%; } 100% { top: 0; } }`}</style>
       </div>
     );
   };
@@ -309,47 +336,47 @@ export default function App() {
             <div><p className="text-sm text-gray-500 font-medium">Jadwal PM</p><p className="text-2xl font-bold text-gray-800">{pendingPMs.length}</p></div>
           </div>
         </div>
-        
-        {/* Area Charts HTML CSS */}
+
+        {/* Visual Charts Sederhana (HTML & CSS Only) */}
         {['admin', 'teknisi'].includes(currentUser.role) && (
-           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 lg:col-span-1">
-                 <h3 className="font-bold text-gray-800 mb-6 border-b pb-2">Status Kesediaan Mesin</h3>
-                 <div className="flex flex-col items-center justify-center">
-                    <div className="relative w-40 h-40 rounded-full flex items-center justify-center bg-gray-100 shadow-inner" style={{ background: `conic-gradient(#22c55e ${persentaseSehat}%, #ef4444 0)` }}>
-                       <div className="w-32 h-32 bg-white rounded-full flex flex-col items-center justify-center absolute">
-                          <span className="text-3xl font-black text-gray-800">{persentaseSehat}%</span>
-                          <span className="text-xs text-gray-500 font-bold uppercase mt-1">Normal</span>
-                       </div>
-                    </div>
-                    <div className="mt-6 flex justify-center gap-6 w-full px-4">
-                       <div className="text-center"><div className="w-3 h-3 bg-green-500 rounded-full inline-block mr-2"></div><span className="text-sm font-bold text-gray-700">Sehat ({totalMesin - mesinRusak})</span></div>
-                       <div className="text-center"><div className="w-3 h-3 bg-red-500 rounded-full inline-block mr-2"></div><span className="text-sm font-bold text-gray-700">Rusak ({mesinRusak})</span></div>
-                    </div>
-                 </div>
-              </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+             <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+                <h3 className="font-bold text-gray-800 mb-4 border-b pb-2">Kesehatan Mesin (Availability)</h3>
+                <div className="flex flex-col justify-center items-center py-6">
+                   <div className="w-full bg-gray-200 rounded-full h-8 mb-4 overflow-hidden relative">
+                     <div className="bg-green-500 h-8 flex items-center justify-end pr-2 text-white font-bold text-xs" style={{ width: `${persentaseSehat}%` }}>
+                       {persentaseSehat > 10 && `${persentaseSehat}% SEHAT`}
+                     </div>
+                   </div>
+                   <div className="flex justify-between w-full text-sm text-gray-600 font-medium px-2">
+                     <span>{totalMesin - mesinRusak} Mesin Beroperasi</span>
+                     <span className="text-red-500">{mesinRusak} Mesin Breakdown</span>
+                   </div>
+                </div>
+             </div>
 
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 lg:col-span-2">
-                 <h3 className="font-bold text-gray-800 mb-4 border-b pb-2">Top 5 Mesin Sering Rusak</h3>
-                 <div className="space-y-4 pt-2">
-                    {sortedBadActors.length > 0 ? sortedBadActors.map((item, idx) => (
-                       <div key={idx}>
-                          <div className="flex justify-between text-xs font-bold text-gray-700 mb-1">
-                             <span>{item.name}</span>
-                             <span>{item.jumlah} Kali</span>
-                          </div>
-                          <div className="w-full bg-gray-200 rounded-full h-3">
-                             <div className="bg-blue-500 h-3 rounded-full transition-all duration-1000" style={{ width: `${(item.jumlah / maxErrors) * 100}%` }}></div>
-                          </div>
-                       </div>
-                    )) : (
-                       <p className="text-center text-gray-400 italic py-8">Belum ada data kerusakan mesin.</p>
-                    )}
-                 </div>
-              </div>
-           </div>
+             <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+                <h3 className="font-bold text-gray-800 mb-4 border-b pb-2">Top 5 Mesin Sering Rusak</h3>
+                <div className="space-y-3">
+                   {sortedBadActors.length > 0 ? sortedBadActors.map((actor, idx) => {
+                      const barWidth = Math.max((actor.jumlah / maxErrors) * 100, 10);
+                      return (
+                        <div key={idx} className="flex flex-col text-sm">
+                           <div className="flex justify-between mb-1">
+                             <span className="font-bold text-gray-700">{actor.name}</span>
+                             <span className="text-gray-500">{actor.jumlah}x Rusak</span>
+                           </div>
+                           <div className="w-full bg-gray-100 rounded-full h-3">
+                             <div className="bg-blue-500 h-3 rounded-full" style={{ width: `${barWidth}%` }}></div>
+                           </div>
+                        </div>
+                      )
+                   }) : <p className="text-center text-sm text-gray-400 py-6">Belum ada riwayat kerusakan.</p>}
+                </div>
+             </div>
+          </div>
         )}
-
+        
         <div className="bg-gradient-to-r from-blue-50 to-white p-5 md:p-6 rounded-xl shadow-sm mb-6 border border-blue-100">
           <h3 className="text-lg font-semibold mb-1 text-blue-900">Selamat Datang, {currentUser.name}</h3>
           <p className="text-gray-600 text-sm">Anda login sebagai <strong>{currentUser.role.toUpperCase()}</strong>. Lingkup operasional: <span className="bg-blue-200 text-blue-800 px-2 py-0.5 rounded font-bold">{currentUser.factory}</span>.</p>
@@ -407,6 +434,35 @@ export default function App() {
                 </div>
               </div>
             </div>
+            
+            <div className="bg-white p-5 rounded-xl shadow-sm border border-blue-100">
+              <h4 className="font-bold text-blue-700 mb-4 flex items-center"><i className="fa-solid fa-list-check mr-2"></i> Daily Activity Teknisi</h4>
+              <div className="overflow-x-auto rounded-lg border border-blue-200">
+                <table className="w-full text-sm border-collapse min-w-[600px]">
+                  <thead>
+                    <tr className="bg-blue-100 text-left">
+                      <th className="p-3 font-semibold text-blue-900">Tanggal</th>
+                      <th className="p-3 font-semibold text-blue-900">Teknisi</th>
+                      <th className="p-3 font-semibold text-blue-900">Pabrik</th>
+                      <th className="p-3 font-semibold text-blue-900">Aktivitas</th>
+                      <th className="p-3 font-semibold text-blue-900">Waktu</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white">
+                    {dailyActivities.slice().reverse().map(act => (
+                      <tr key={act.id} className="border-b border-gray-100 hover:bg-gray-50">
+                        <td className="p-3 whitespace-nowrap text-gray-600">{act.date}</td>
+                        <td className="p-3 font-semibold text-gray-800">{act.teknisi}</td>
+                        <td className="p-3"><span className="text-[10px] uppercase font-bold bg-gray-200 text-gray-700 px-2 py-1 rounded">{act.factory}</span></td>
+                        <td className="p-3 text-gray-700">{act.activity}</td>
+                        <td className="p-3 whitespace-nowrap text-gray-500 font-medium">{act.startTime} - {act.endTime}</td>
+                      </tr>
+                    ))}
+                    {dailyActivities.length === 0 && <tr><td colSpan="5" className="p-8 text-center text-gray-500 italic">Belum ada aktivitas.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -414,7 +470,6 @@ export default function App() {
   };
 
   const AdminKelolaPabrik = () => {
-    // ... (Fungsi tetap sama) ...
     const [newFactory, setNewFactory] = useState('');
     const [editId, setEditId] = useState(null);
     const [editName, setEditName] = useState('');
@@ -476,7 +531,6 @@ export default function App() {
   };
 
   const AdminKelolaUser = () => {
-    // ... (Fungsi tetap sama) ...
     const defaultFactory = factories[0]?.name || '';
     const [formData, setFormData] = useState({ id: null, username: '', password: '', role: 'user', name: '', factory: defaultFactory });
     const [isEditing, setIsEditing] = useState(false);
@@ -576,7 +630,6 @@ export default function App() {
   };
 
   const AdminKelolaMesin = () => {
-    // ... (Fungsi tetap sama) ...
     const defaultFactory = factories[0]?.name || '';
     const [newMachine, setNewMachine] = useState({ code: '', name: '', location: '', factory: defaultFactory });
     const [selectedMachineParams, setSelectedMachineParams] = useState(null);
@@ -611,6 +664,41 @@ export default function App() {
       }
       showMessage('Tersimpan', 'Parameter berhasil disimpan.', 'success');
       setSelectedMachineParams(null);
+    };
+
+    // --- FITUR GENERATOR / CETAK QR MESIN ---
+    const handlePrintQR = (machine) => {
+      const printWindow = window.open('', '_blank');
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(machine.code)}`;
+      
+      printWindow.document.write(`
+        <html>
+          <head>
+            <title>Cetak Label QR - ${machine.name}</title>
+            <style>
+              body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #e5e7eb; }
+              .label-card { background: white; padding: 20px; border: 2px dashed #1f2937; text-align: center; border-radius: 16px; width: 280px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+              .label-card img { width: 200px; height: 200px; margin: 10px auto; display: block; border: 4px solid #f3f4f6; border-radius: 8px;}
+              h2 { margin: 0 0 5px 0; font-size: 22px; color: #111827; text-transform: uppercase; font-weight: 900;}
+              p.code { margin: 0; font-size: 16px; font-weight: bold; background: #111827; color: white; display: inline-block; padding: 4px 12px; border-radius: 4px; margin-bottom: 10px;}
+              p.loc { margin: 0; font-size: 12px; color: #4b5563; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;}
+              @media print { 
+                body { background: white; align-items: flex-start; justify-content: flex-start; padding: 20px;} 
+                .label-card { box-shadow: none; border: 1px solid #000; } 
+              }
+            </style>
+          </head>
+          <body>
+            <div class="label-card">
+              <h2>${machine.name}</h2>
+              <p class="code">${machine.code}</p>
+              <img src="${qrUrl}" alt="QR Code" onload="window.print(); window.close();" />
+              <p class="loc">LOKASI: ${machine.factory}</p>
+            </div>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
     };
 
     return (
@@ -660,6 +748,8 @@ export default function App() {
                       </div>
                     </div>
                     <div className="flex gap-2 w-full sm:w-auto">
+                       {/* Tombol Cetak QR Mesin */}
+                       <button type="button" onClick={() => handlePrintQR(m)} className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-xs px-3 py-2 rounded-lg font-bold border border-indigo-200" title="Cetak Label QR Mesin"><i className="fa-solid fa-qrcode"></i></button>
                        <button type="button" onClick={() => handleSelectMachineParams(m.id)} className="flex-1 sm:flex-none bg-gray-800 hover:bg-black text-white text-xs px-3 py-2 rounded-lg font-bold">Setup Cek</button>
                        <button type="button" onClick={() => handleDeleteMachine(m.id, m.name)} className="bg-red-100 hover:bg-red-200 text-red-600 text-xs px-3 py-2 rounded-lg font-bold border border-red-200"><i className="fa-solid fa-trash"></i></button>
                     </div>
@@ -699,12 +789,9 @@ export default function App() {
   };
 
   const AdminKelolaSparepart = () => {
-    // ... (Fungsi tetap sama) ...
     const defaultFactory = factories[0]?.name || '';
     const [spForm, setSpForm] = useState({ code: '', name: '', factory: defaultFactory, stock: '', unit: 'pcs' });
     const [activeTab, setActiveTab] = useState('stok'); 
-    
-    // Fitur Edit Sparepart
     const [editSpId, setEditSpId] = useState(null);
     const [editSpForm, setEditSpForm] = useState({ code: '', name: '', factory: '', unit: '' });
 
@@ -740,7 +827,6 @@ export default function App() {
       }
     };
 
-    // Fungsi Edit & Delete Sparepart
     const handleEditClick = (sp) => {
       setEditSpId(sp.id);
       setEditSpForm({ code: sp.code, name: sp.name, factory: sp.factory, unit: sp.unit });
@@ -850,7 +936,6 @@ export default function App() {
           </div>
         )}
         
-        {/* TAB REQUEST SPAREPART TETAP SAMA */}
         {activeTab === 'request' && (
           <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border-t-4 border-orange-500">
              <h3 className="font-semibold text-lg mb-4 text-gray-800">Daftar Request Pengadaan Part Baru (Dari Teknisi)</h3>
@@ -881,13 +966,10 @@ export default function App() {
   };
 
   const SetupPM = () => {
-    // ... (Fungsi tetap sama) ...
     const [newSchedule, setNewSchedule] = useState({ machineId: '', date: '', title: '' });
     const [selectedSchedule, setSelectedSchedule] = useState(null);
     const [tempTasks, setTempTasks] = useState([]);
     const [newTaskText, setNewTaskText] = useState('');
-    
-    // Fitur Edit Jadwal PM
     const [editSchId, setEditSchId] = useState(null);
     const [editSchForm, setEditSchForm] = useState({ title: '', date: '' });
 
@@ -899,7 +981,7 @@ export default function App() {
     };
 
     const handleSelectSchedule = (sId) => {
-      if(editSchId === sId) return; // cegah klik ganda saat edit
+      if(editSchId === sId) return; 
       setSelectedSchedule(sId);
       setTempTasks(pmParams.filter(p => p.scheduleId === sId).map(p => p.task));
     };
@@ -920,7 +1002,6 @@ export default function App() {
       });
     };
 
-    // Fungsi Hapus dan Simpan Edit PM
     const handleDeleteSch = (id, title) => {
       showConfirm('Hapus Jadwal PM', `Yakin hapus jadwal "${title}" secara permanen?`, async () => {
         await deleteDoc(docRef('cmms_pmSchedules', id));
@@ -1011,7 +1092,6 @@ export default function App() {
   };
 
   const EksekusiPM = () => {
-    // ... (Fungsi tetap sama) ...
     const pendingSchedules = pmSchedules.filter(s => s.status === 'Pending' && getAvailableMachines().find(m => m.id === s.machineId));
     const [pmForms, setPmForms] = useState({});
 
@@ -1223,7 +1303,6 @@ export default function App() {
   };
 
   const TeknisiDailyActivity = () => {
-    // ... (Fungsi tetap sama) ...
     const [formData, setFormData] = useState({ date: new Date().toISOString().split('T')[0], startTime: '', endTime: '', activity: '' });
     const handleSubmit = async (e) => {
       e.preventDefault();
@@ -1274,8 +1353,22 @@ export default function App() {
   const CekHarian = () => {
     const [selectedMachine, setSelectedMachine] = useState(null);
     const [checkData, setCheckData] = useState({});
+    const [showScanner, setShowScanner] = useState(false);
     const availableMachines = getAvailableMachines();
     const params = selectedMachine ? dailyParams.filter(p => p.machineId === selectedMachine) : [];
+
+    const handleScanComplete = (decodedText) => {
+       setShowScanner(false);
+       const scannedMachine = availableMachines.find(m => m.code.toLowerCase() === decodedText.toLowerCase());
+       
+       if (scannedMachine) {
+          setSelectedMachine(scannedMachine.id);
+          setCheckData({});
+          showMessage('Scan Sukses', `Mesin ${scannedMachine.name} terpilih otomatis.`, 'success');
+       } else {
+          showMessage('Scan Gagal', `Kode mesin "${decodedText}" tidak ditemukan di area Anda.`, 'error');
+       }
+    };
 
     const handleSaveCheck = async (e) => {
       e.preventDefault();
@@ -1285,31 +1378,17 @@ export default function App() {
       setCheckData({});
     };
 
-    const handleQRSuccess = (code) => {
-       const m = availableMachines.find(x => x.code === code);
-       if (m) {
-          setSelectedMachine(m.id);
-          setCheckData({});
-          setShowScanner(false);
-          showMessage('Scan Sukses', `Mesin terpilih: ${m.name}`, 'success');
-       } else {
-          showMessage('Scan Gagal', `Mesin dengan kode ${code} tidak ditemukan.`, 'error');
-       }
-    };
-
     return (
       <div className="space-y-6">
-        {showScanner && <SimulatedQRScanner onScanSuccess={handleQRSuccess} onClose={() => setShowScanner(false)} />}
+        {showScanner && <BarcodeScannerModal onScanSuccess={handleScanComplete} onClose={() => setShowScanner(false)} />}
         
         <div className="flex justify-between items-center">
            <h2 className="text-2xl font-bold text-gray-800">Form Checklist Harian</h2>
-           <button onClick={() => setShowScanner(true)} className="bg-gray-800 hover:bg-black text-white px-4 py-2 rounded shadow-md text-sm font-bold flex items-center">
-              <i className="fa-solid fa-qrcode mr-2"></i> Scan QR Aset
-           </button>
+           <button onClick={() => setShowScanner(true)} className="bg-gray-800 text-white px-4 py-2 rounded-lg font-bold shadow-md hover:bg-black"><i className="fa-solid fa-qrcode mr-2"></i> Scan QR Mesin</button>
         </div>
 
         <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-100">
-          <h3 className="text-xs font-bold text-gray-500 uppercase mb-4 border-b pb-2">1. Pilih Mesin Manual</h3>
+          <h3 className="text-xs font-bold text-gray-500 uppercase mb-4 border-b pb-2">Atau Pilih Mesin Manual</h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 md:gap-4">
             {availableMachines.map(m => (
               <div key={m.id} onClick={() => { setSelectedMachine(m.id); setCheckData({}); }} className={`cursor-pointer border-2 p-4 rounded-xl flex flex-col items-center text-center transition-all ${selectedMachine === m.id ? 'bg-blue-600 border-blue-600 shadow-lg scale-105' : 'bg-white hover:border-blue-300'}`}>
@@ -1319,6 +1398,7 @@ export default function App() {
             ))}
           </div>
         </div>
+
         {selectedMachine && (
           <div className="bg-white p-4 md:p-6 rounded-xl shadow-xl border-t-8 border-blue-500 animate-[fadeIn_0.3s]">
             <h3 className="text-lg md:text-xl font-bold mb-6 flex items-center border-b pb-4"><i className="fa-solid fa-list-check text-blue-500 mr-3"></i> Checklist: {machines.find(m=>m.id === selectedMachine)?.name}</h3>
@@ -1355,7 +1435,6 @@ export default function App() {
   };
 
   const TeknisiSparepart = () => {
-    // ... (Fungsi tetap sama) ...
     const [activeTab, setActiveTab] = useState('ambil');
     const availableParts = spareparts.filter(sp => sp.factory === currentUser.factory);
     const [useForm, setUseForm] = useState({ partId: '', qty: '', remarks: '' });
@@ -1475,7 +1554,6 @@ export default function App() {
   };
 
   const CetakLaporan = () => {
-    // ... (Fungsi tetap sama) ...
     const [activeTab, setActiveTab] = useState('harian');
     const [filterFactory, setFilterFactory] = useState('All');
     const [filterMachine, setFilterMachine] = useState('');
@@ -1789,7 +1867,7 @@ export default function App() {
   const NavItem = ({ id, icon, label, roles }) => {
     if (!roles.includes(currentUser.role)) return null;
     return (
-      <button onClick={() => {setActiveMenu(id); setIsSidebarOpen(false)}} className={`w-full flex items-center px-4 py-3 rounded-lg text-left font-medium text-sm ${activeMenu === id ? 'bg-blue-600 text-white shadow' : 'text-blue-100 hover:bg-blue-800'}`}>
+      <button onClick={() => {setActiveMenu(id); setIsSidebarOpen(false)}} className={`w-full flex items-center px-4 py-3 rounded-lg text-left font-medium text-sm ${activeMenu === id ? 'bg-blue-600 text-white' : 'text-blue-100 hover:bg-blue-800'}`}>
         <i className={`fa-solid ${icon} w-6 mr-3 text-lg`}></i> <span>{label}</span>
       </button>
     );
@@ -1818,7 +1896,7 @@ export default function App() {
           <nav className="space-y-1">
             <NavItem id="dashboard" icon="fa-chart-pie" label="Dashboard" roles={['admin', 'teknisi', 'user']} />
             <div className={currentUser.role === 'admin' ? 'pt-4 pb-2' : 'hidden'}>
-              <p className="text-[10px] font-bold text-gray-500 uppercase px-4 mb-2 mt-2">Manajemen Admin</p>
+              <p className="text-[10px] font-bold text-gray-500 uppercase px-4 mb-2">Manajemen Admin</p>
               <NavItem id="kelola_pabrik" icon="fa-city" label="Master Pabrik / Lokasi" roles={['admin']} />
               <NavItem id="kelola_user" icon="fa-users-gear" label="Manajemen Akun" roles={['admin']} />
               <NavItem id="kelola_mesin" icon="fa-network-wired" label="Aset & Parameter" roles={['admin']} />
@@ -1827,7 +1905,7 @@ export default function App() {
               <NavItem id="cetak" icon="fa-print" label="Pusat Dokumen (Cetak)" roles={['admin']} />
             </div>
             <div className={currentUser.role === 'teknisi' ? 'pt-4 pb-2' : 'hidden'}>
-              <p className="text-[10px] font-bold text-gray-500 uppercase px-4 mb-2 mt-2">Tugas Teknisi</p>
+              <p className="text-[10px] font-bold text-gray-500 uppercase px-4 mb-2">Tugas Teknisi</p>
               <NavItem id="daily_activity" icon="fa-book-open" label="Buku Jurnal Harian" roles={['teknisi']} />
               <NavItem id="cek_harian" icon="fa-clipboard-list" label="Checklist Rutin Mesin" roles={['teknisi']} />
               <NavItem id="penanganan_rusak" icon="fa-screwdriver-wrench" label="Tangani Breakdown" roles={['teknisi']} />
@@ -1839,59 +1917,52 @@ export default function App() {
             </div>
           </nav>
         </div>
-        <div className="absolute bottom-0 w-full p-4 bg-gray-950 shrink-0"><button onClick={handleLogout} className="bg-red-600 text-white w-full p-3 rounded font-bold hover:bg-red-700 transition-colors"><i className="fa-solid fa-power-off mr-2"></i> KELUAR</button></div>
+        <div className="absolute bottom-0 w-full p-4 bg-gray-950 shrink-0"><button onClick={handleLogout} className="bg-red-600 text-white w-full p-3 rounded font-bold"><i className="fa-solid fa-power-off mr-2"></i> KELUAR</button></div>
       </aside>
-      
       <main className="flex-1 flex flex-col bg-gray-50 overflow-hidden relative">
-        <header className="print:hidden bg-white shadow-sm border-b h-16 flex items-center justify-between px-4 md:px-6 z-10 shrink-0">
+        <header className="print:hidden bg-white shadow-sm border-b h-16 flex items-center justify-between px-4 md:px-8 z-10 shrink-0 sticky top-0">
           <div className="flex items-center">
              <button className="md:hidden mr-4 text-gray-600 hover:text-black" onClick={() => setIsSidebarOpen(true)}><i className="fa-solid fa-bars-staggered text-lg"></i></button>
              <h2 className="text-lg font-black uppercase text-gray-800 tracking-widest truncate">{activeMenu.replace('_', ' ')}</h2>
           </div>
 
-          {/* Ikon Lonceng Notifikasi */}
           <div className="relative">
-             <button onClick={() => setIsNotifOpen(!isNotifOpen)} className="text-gray-600 hover:text-blue-600 transition-colors p-2 relative">
-                <i className="fa-solid fa-bell text-xl"></i>
+             <button onClick={() => setIsNotifOpen(!isNotifOpen)} className="text-gray-600 hover:text-blue-600 relative p-2">
+                <i className="fa-regular fa-bell text-xl"></i>
                 {notifications.length > 0 && (
-                   <span className="absolute top-1 right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-white shadow-sm animate-bounce">
+                   <span className="absolute top-0 right-0 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow border-2 border-white">
                       {notifications.length}
                    </span>
                 )}
              </button>
-
-             {/* Dropdown Notifikasi */}
+             
              {isNotifOpen && (
-                <div className="absolute right-0 mt-2 w-72 md:w-80 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 overflow-hidden transform origin-top-right transition-all">
-                   <div className="bg-gray-900 text-white p-3 font-bold flex justify-between items-center">
-                      <span>Notifikasi Sistem</span>
-                      <span className="text-[10px] bg-gray-700 px-2 py-1 rounded-full">{notifications.length} Baru</span>
+                <div className="absolute right-0 mt-2 w-72 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 overflow-hidden animate-[fadeIn_0.2s_ease-in-out]">
+                   <div className="bg-gray-900 text-white p-3 text-sm font-bold flex justify-between items-center">
+                     <span>Notifikasi Sistem</span>
+                     <span className="text-[10px] bg-gray-700 px-2 py-0.5 rounded">{notifications.length} Baru</span>
                    </div>
                    <div className="max-h-80 overflow-y-auto">
                       {notifications.length > 0 ? notifications.map((n, idx) => (
-                         <div key={idx} onClick={() => { setActiveMenu(n.action); setIsNotifOpen(false); }} className="p-3 border-b border-gray-100 hover:bg-blue-50 cursor-pointer flex gap-3 items-start transition-colors">
-                            <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white ${n.type==='alert'?'bg-red-500':n.type==='warning'?'bg-orange-500':n.type==='success'?'bg-green-500':'bg-blue-500'}`}>
-                               <i className={`fa-solid ${n.type==='alert'?'fa-triangle-exclamation':n.type==='warning'?'fa-box':n.type==='success'?'fa-check':'fa-info'}`}></i>
+                         <div key={idx} onClick={() => {setActiveMenu(n.action); setIsNotifOpen(false);}} className="p-3 border-b border-gray-100 hover:bg-blue-50 cursor-pointer flex gap-3 items-start">
+                            <div className={`mt-1 flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white ${n.type==='alert'?'bg-red-500':n.type==='warning'?'bg-orange-500':n.type==='success'?'bg-green-500':'bg-blue-500'}`}>
+                               <i className={`fa-solid ${n.type==='alert'?'fa-triangle-exclamation':n.type==='warning'?'fa-clock':n.type==='success'?'fa-check-double':'fa-info'}`}></i>
                             </div>
                             <div>
                                <p className="text-xs font-bold text-gray-900">{n.title}</p>
-                               <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{n.text}</p>
+                               <p className="text-xs text-gray-600 leading-snug my-0.5">{n.text}</p>
                             </div>
                          </div>
                       )) : (
-                         <div className="p-6 text-center text-gray-400">
-                            <i className="fa-regular fa-bell-slash text-3xl mb-2"></i>
-                            <p className="text-sm">Tidak ada notifikasi baru.</p>
-                         </div>
+                         <p className="text-center text-sm text-gray-500 py-6 italic">Tidak ada notifikasi baru.</p>
                       )}
                    </div>
                 </div>
              )}
           </div>
         </header>
-        
+
         <div className="flex-1 overflow-auto p-4 md:p-8 print:p-0 print:overflow-visible pb-20 md:pb-8 relative">
-          {/* Overlay untuk menutup notif saat klik di luar area */}
           {isNotifOpen && <div className="absolute inset-0 z-40 bg-transparent" onClick={() => setIsNotifOpen(false)}></div>}
           
           <div className="relative z-0">
