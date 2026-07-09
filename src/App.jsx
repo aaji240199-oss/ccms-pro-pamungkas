@@ -32,8 +32,8 @@ export default function App() {
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [showScanner, setShowScanner] = useState(false);
-  const [chatTicket, setChatTicket] = useState(null); // State untuk Fitur Diskusi
-  const [dismissedNotifs, setDismissedNotifs] = useState([]); // State untuk notif yang ditutup
+  const [chatTicket, setChatTicket] = useState(null);
+  const [dismissedNotifs, setDismissedNotifs] = useState([]);
 
   // --- STATES: DATABASE ---
   const [factories, setFactories] = useState([]);
@@ -52,7 +52,6 @@ export default function App() {
 
   // --- EFFECT: LOAD SCRIPT & FIREBASE AUTH ---
   useEffect(() => {
-    // Load FontAwesome
     if(!document.getElementById('fa-script')){
       const link = document.createElement('link');
       link.id = 'fa-script';
@@ -61,7 +60,6 @@ export default function App() {
       document.head.appendChild(link);
     }
     
-    // Load HTML5 QRCode Scanner untuk Kamera
     if(!document.getElementById('qr-script')){
       const qrScript = document.createElement('script');
       qrScript.id = 'qr-script';
@@ -77,19 +75,16 @@ export default function App() {
         } else {
           await signInAnonymously(auth);
         }
-      } catch (err) {
-        console.error("Auth error:", err);
-      }
+      } catch (err) { console.error("Auth error:", err); }
     };
     initAuth();
     const unsubscribe = onAuthStateChanged(auth, setFbUser);
     return () => unsubscribe();
   }, []);
 
-  // --- EFFECT: SINKRONISASI DATABASE (REAL-TIME) ---
+  // --- EFFECT: SINKRONISASI DATABASE ---
   useEffect(() => {
     if (!fbUser) return;
-
     const getPath = (colName) => collection(db, 'artifacts', appId, 'public', 'data', colName);
     const handleSnap = (setter) => (snap) => setter(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     const handleErr = (err) => console.error("DB Sync Error:", err);
@@ -124,35 +119,38 @@ export default function App() {
 
     if (['admin', 'teknisi'].includes(currentUser.role)) {
       const openBrk = breakdowns.filter(b => b.status === 'Open' && availableMachines.find(m => m.id === b.machineId));
-      openBrk.forEach(b => notifs.push({ id: b.id, title: 'Breakdown Baru', text: b.description, type: 'alert', action: currentUser.role === 'admin' ? 'dashboard' : 'penanganan_rusak' }));
+      openBrk.forEach(b => notifs.push({ id: b.id, title: 'Breakdown Baru', text: b.description, type: 'alert', action: currentUser.role === 'admin' ? 'histori_perbaikan' : 'penanganan_rusak' }));
     }
+    
     if (currentUser.role === 'admin') {
       sparepartRequests.filter(r => r.status === 'Pending').forEach(r => 
          notifs.push({ id: r.id, title: 'Request Part', text: `${r.requestedBy} meminta ${r.partName}`, type: 'warning', action: 'kelola_sparepart' })
       );
+      // PERBAIKAN: Stok minimal 1 (<=1), dan hanya tampil di Admin
+      spareparts.filter(sp => sp.stock <= 1).forEach(sp => 
+         notifs.push({ id: `stock_${sp.id}`, title: 'Stok Menipis/Habis', text: `${sp.name} sisa ${sp.stock} ${sp.unit}`, type: 'warning', action: 'kelola_sparepart' })
+      );
     }
+    
     if (currentUser.role === 'teknisi') {
       pmSchedules.filter(s => s.status === 'Pending' && availableMachines.find(m => m.id === s.machineId)).forEach(p => 
          notifs.push({ id: p.id, title: 'Jadwal PM Baru', text: p.title, type: 'info', action: 'eksekusi_pm' })
       );
     }
+    
     if (currentUser.role === 'user') {
       breakdowns.filter(b => b.reportedBy === currentUser.name && b.status === 'Selesai Diperbaiki').forEach(b => 
          notifs.push({ id: b.id, title: 'Mesin Selesai', text: `Perbaikan mesin telah selesai.`, type: 'success', action: 'req_perbaikan' })
       );
     }
     
-    // Fitur Low Stock Alert
-    if (['admin', 'teknisi'].includes(currentUser.role)) {
-      spareparts.filter(sp => sp.stock < 5).forEach(sp => 
-         notifs.push({ id: `stock_${sp.id}`, title: 'Stok Menipis', text: `${sp.name} sisa ${sp.stock} ${sp.unit}`, type: 'warning', action: 'kelola_sparepart' })
-      );
-    }
-    
-    // Filter notif yang sudah di-dismiss oleh user
-    setNotifications(notifs.filter(n => !dismissedNotifs.includes(n.id)).slice(0, 8));
+    setNotifications(notifs.filter(n => !dismissedNotifs.includes(n.id)));
   }, [breakdowns, sparepartRequests, pmSchedules, currentUser, machines, spareparts, dismissedNotifs]);
 
+  const markAllNotifsAsRead = () => {
+    setDismissedNotifs(prev => [...prev, ...notifications.map(n => n.id)]);
+    setIsNotifOpen(false);
+  };
 
   // --- HELPER FUNCTIONS ---
   const showMessage = (title, message, type = 'info') => setDialog({ title, message, type, onConfirm: null });
@@ -165,14 +163,22 @@ export default function App() {
     return machines.filter(m => m.factory === currentUser?.factory);
   };
 
-  const seedDatabase = async () => {
-    try {
-      await addDoc(colRef('cmms_factories'), { name: 'Pabrik A' });
-      await addDoc(colRef('cmms_users'), { username: 'admin', password: '123', role: 'admin', name: 'Budi (Supervisor)', factory: 'All' });
-      showMessage('Berhasil', 'Database awal berhasil dibuat! Silakan login dengan akun: admin / 123', 'success');
-    } catch (e) {
-      showMessage('Error', 'Gagal membuat database awal.', 'error');
-    }
+  const calculateDowntime = (start, end) => {
+    if (!start || !end) return '-';
+    const s = new Date(start);
+    const e = new Date(end);
+    if (isNaN(s) || isNaN(e)) return '-';
+    const diff = Math.max(0, e - s);
+    const m = Math.floor((diff / (1000 * 60)) % 60);
+    const h = Math.floor(diff / (1000 * 60 * 60));
+    return `${h} Jam ${m} Menit`;
+  };
+
+  const handleDeleteBreakdown = (id, itemName) => {
+    showConfirm('Hapus Request?', `Yakin ingin menghapus/membatalkan tiket kerusakan "${itemName}"? Tindakan ini tidak dapat dikembalikan.`, async () => {
+      await deleteDoc(docRef('cmms_breakdowns', id));
+      showMessage('Berhasil', 'Tiket kerusakan berhasil dihapus.', 'success');
+    });
   };
 
   const handleLogin = (e) => {
@@ -188,56 +194,27 @@ export default function App() {
       showMessage('Gagal Login', 'Username atau password salah!', 'error');
     }
   };
-
   const handleLogout = () => setCurrentUser(null);
 
-  // --- FITUR BARU: EXPORT CSV ---
   const exportToCSV = (data, filename) => {
-    if (!data || !data.length) {
-       showMessage('Kosong', 'Tidak ada data untuk diekspor.', 'warning');
-       return;
-    }
+    if (!data || !data.length) { showMessage('Kosong', 'Tidak ada data untuk diekspor.', 'warning'); return; }
     const headers = Object.keys(data[0]).join(',');
     const csv = [headers, ...data.map(row => Object.values(row).map(val => `"${String(val || '').replace(/"/g, '""')}"`).join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = filename;
-    link.click();
-  };
-
-  // Fungsi Hitung Downtime
-  const calculateDowntime = (start, end) => {
-    if (!start || !end) return '-';
-    const s = new Date(start);
-    const e = new Date(end);
-    if (isNaN(s) || isNaN(e)) return '-';
-    const diff = Math.max(0, e - s);
-    const m = Math.floor((diff / (1000 * 60)) % 60);
-    const h = Math.floor(diff / (1000 * 60 * 60));
-    return `${h} Jam ${m} Menit`;
-  };
-
-  // Fungsi Hapus Request / Tiket
-  const handleDeleteBreakdown = (id, itemName) => {
-    showConfirm('Hapus Request?', `Yakin ingin menghapus atau membatalkan tiket kerusakan untuk "${itemName}"? Tindakan ini tidak dapat dikembalikan.`, async () => {
-      await deleteDoc(docRef('cmms_breakdowns', id));
-      showMessage('Berhasil', 'Tiket kerusakan berhasil dihapus.', 'success');
-    });
+    link.href = URL.createObjectURL(blob); link.download = filename; link.click();
   };
 
   // --- KOMPONEN UI UTAMA ---
   const ModalDialog = () => {
     if (!dialog) return null;
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 z-[100] flex items-center justify-center p-4 print:hidden">
+      <div className="fixed inset-0 bg-black bg-opacity-60 z-[100] flex items-center justify-center p-4 print:hidden backdrop-blur-sm">
         <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6 animate-[fadeIn_0.2s_ease-in-out]">
           <h3 className={`text-lg font-bold mb-2 ${dialog.type === 'error' ? 'text-red-600' : 'text-gray-900'}`}>{dialog.title}</h3>
           <p className="text-gray-600 mb-6 text-sm">{dialog.message}</p>
           <div className="flex justify-end gap-3">
-            {dialog.type === 'confirm' && (
-              <button onClick={() => setDialog(null)} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-300">Batal</button>
-            )}
+            {dialog.type === 'confirm' && <button onClick={() => setDialog(null)} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-300">Batal</button>}
             <button onClick={() => { if (dialog.onConfirm) dialog.onConfirm(); setDialog(null); }} className={`px-4 py-2 text-white rounded-lg text-sm font-medium shadow-sm transition-colors ${dialog.type === 'error' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
               {dialog.type === 'confirm' ? 'Ya, Eksekusi' : 'Tutup'}
             </button>
@@ -247,37 +224,9 @@ export default function App() {
     );
   };
 
-  const ProfileEditModal = () => {
-    if (!profileDialog) return null;
-    const [form, setForm] = useState({ name: currentUser.name, username: currentUser.username, password: currentUser.password });
-    
-    const handleSaveProfile = async (e) => {
-      e.preventDefault();
-      await updateDoc(docRef('cmms_users', currentUser.id), form);
-      setCurrentUser({ ...currentUser, ...form });
-      setProfileDialog(false);
-      showMessage('Sukses', 'Profil berhasil diperbarui. Perubahan langsung diterapkan.', 'success');
-    };
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-75 z-[100] flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6">
-          <div className="flex justify-between items-center mb-4 border-b pb-2">
-            <h3 className="text-lg font-bold text-gray-800"><i className="fa-solid fa-user-pen text-blue-500 mr-2"></i> Edit Profil Saya</h3>
-            <button onClick={() => setProfileDialog(false)} className="text-gray-400 hover:text-red-500"><i className="fa-solid fa-xmark text-xl"></i></button>
-          </div>
-          <form onSubmit={handleSaveProfile} className="space-y-4">
-            <div><label className="block text-xs font-bold mb-1 text-gray-600">Nama Lengkap</label><input type="text" required className="w-full border p-2 rounded-lg" value={form.name} onChange={e => setForm({...form, name: e.target.value})} /></div>
-            <div><label className="block text-xs font-bold mb-1 text-gray-600">Username Login</label><input type="text" required className="w-full border p-2 rounded-lg" value={form.username} onChange={e => setForm({...form, username: e.target.value})} /></div>
-            <div><label className="block text-xs font-bold mb-1 text-gray-600">Password Baru</label><input type="text" required className="w-full border p-2 rounded-lg" value={form.password} onChange={e => setForm({...form, password: e.target.value})} /></div>
-            <button type="submit" className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg shadow mt-2">Simpan Profil</button>
-          </form>
-        </div>
-      </div>
-    );
-  };
-
   const CameraQRScanner = ({ onScanSuccess, onClose }) => {
+    const [manualCode, setManualCode] = useState('');
+    
     useEffect(() => {
       let scanner = null;
       const initScanner = async () => {
@@ -286,34 +235,41 @@ export default function App() {
             scanner = new window.Html5QrcodeScanner("reader", { fps: 10, qrbox: {width: 250, height: 250} }, false);
             scanner.render(
               (text) => { if(scanner){ scanner.clear(); onScanSuccess(text); } }, 
-              (error) => { /* abaikan error frame */ }
+              (err) => { /* ignore */ }
             );
-          } else {
-             showMessage('Error', 'Library Scanner belum termuat, pastikan internet aktif.', 'error');
-             onClose();
           }
         } catch (err) { console.log(err); }
       };
-      
-      setTimeout(initScanner, 300);
-      return () => { if(scanner) { scanner.clear().catch(e => console.log(e)); } };
+      const timeout = setTimeout(initScanner, 500);
+      return () => { clearTimeout(timeout); if(scanner) scanner.clear().catch(e=>console.log(e)); };
     }, []);
 
     return (
       <div className="fixed inset-0 bg-black bg-opacity-90 z-[100] flex flex-col items-center justify-center p-4">
-        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden relative">
-          <button onClick={onClose} className="absolute top-2 right-2 z-10 bg-red-500 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold hover:bg-red-600"><i className="fa-solid fa-xmark"></i></button>
-          <div className="p-4 bg-gray-900 text-white text-center"><h3 className="font-bold"><i className="fa-solid fa-camera mr-2"></i> Scan QR Aset Mesin</h3></div>
-          <div className="p-4">
-             <div id="reader" className="w-full min-h-[300px] overflow-hidden rounded-lg border-2 border-dashed border-gray-300"></div>
-             <p className="text-xs text-center text-gray-500 mt-4 italic">* Pastikan Anda memberikan izin (Allow) pada browser untuk mengakses kamera.</p>
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden relative flex flex-col">
+          <div className="p-4 bg-gray-900 text-white flex justify-between items-center shrink-0">
+             <h3 className="font-bold"><i className="fa-solid fa-camera mr-2"></i> Scan QR Aset Mesin</h3>
+             <button onClick={onClose} className="text-red-400 hover:text-red-300 text-xl"><i className="fa-solid fa-xmark"></i></button>
+          </div>
+          <div className="p-4 flex-1 overflow-y-auto">
+             <div id="reader" className="w-full min-h-[250px] overflow-hidden rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 flex items-center justify-center">
+                <span className="text-gray-400 text-sm italic">Memuat kamera...</span>
+             </div>
+             <p className="text-[10px] text-center text-red-500 mt-3 font-bold">* Izinkan akses kamera. (Fitur kamera butuh koneksi HTTPS atau localhost).</p>
+             
+             <div className="mt-6 border-t pt-4">
+                <p className="text-sm font-bold text-gray-700 mb-2">Input Manual (Jika kamera error):</p>
+                <div className="flex gap-2">
+                   <input type="text" placeholder="Masukkan Kode Mesin..." className="flex-1 border-2 p-2 rounded-lg text-sm outline-none focus:border-blue-500" value={manualCode} onChange={e => setManualCode(e.target.value)} />
+                   <button onClick={() => { if(manualCode) onScanSuccess(manualCode); }} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700">Cari</button>
+                </div>
+             </div>
           </div>
         </div>
       </div>
     );
   };
 
-  // --- KOMPONEN DISKUSI TIKET ---
   const TicketChatModal = () => {
     if (!chatTicket) return null;
     const [msg, setMsg] = useState('');
@@ -339,8 +295,8 @@ export default function App() {
             <button onClick={() => setChatTicket(null)} className="text-gray-400 hover:text-white"><i className="fa-solid fa-xmark text-xl"></i></button>
           </div>
           <div className="flex-1 p-4 overflow-y-auto bg-gray-50 space-y-4">
-            <div className="bg-blue-100 p-3 rounded-lg text-sm text-blue-900 border border-blue-200">
-               <strong>Keluhan Masuk:</strong> {ticket.description}
+            <div className="bg-blue-100 p-3 rounded-lg text-sm text-blue-900 border border-blue-200 shadow-sm">
+               <strong>Keluhan:</strong> {ticket.description}
             </div>
             {comments.map((c, i) => (
               <div key={i} className={`flex flex-col ${c.sender === currentUser.name ? 'items-end' : 'items-start'}`}>
@@ -351,13 +307,80 @@ export default function App() {
                 <span className="text-[9px] text-gray-400 mt-1">{c.time}</span>
               </div>
             ))}
-            {comments.length === 0 && <p className="text-center text-gray-400 text-xs mt-10 italic">Belum ada diskusi, silakan tinggalkan pesan.</p>}
+            {comments.length === 0 && <p className="text-center text-gray-400 text-xs mt-10 italic">Belum ada pesan.</p>}
           </div>
           <form onSubmit={handleSend} className="p-3 border-t bg-white flex gap-2 rounded-b-xl shrink-0">
-            <input type="text" className="flex-1 border-2 border-gray-200 p-2 rounded-lg text-sm outline-none focus:border-blue-500" placeholder="Ketik pesan balasan..." value={msg} onChange={e => setMsg(e.target.value)} />
+            <input type="text" className="flex-1 border-2 border-gray-200 p-2 rounded-lg text-sm outline-none focus:border-blue-500" placeholder="Ketik balasan..." value={msg} onChange={e => setMsg(e.target.value)} />
             <button type="submit" className="bg-blue-600 text-white px-5 py-2 rounded-lg font-bold hover:bg-blue-700 transition-colors"><i className="fa-solid fa-paper-plane"></i></button>
           </form>
         </div>
+      </div>
+    );
+  };
+
+  // --- DASHBOARD CHARTS COMPONENTS ---
+  const DonutChart = ({ persentase }) => {
+    const radius = 40;
+    const circumference = 2 * Math.PI * radius;
+    const strokeDashoffset = circumference - (persentase / 100) * circumference;
+    
+    return (
+      <div className="relative w-32 h-32 flex items-center justify-center">
+        <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r={radius} fill="transparent" stroke="#ef4444" strokeWidth="12" />
+          <circle cx="50" cy="50" r={radius} fill="transparent" stroke="#22c55e" strokeWidth="12" strokeDasharray={circumference} strokeDashoffset={strokeDashoffset} className="transition-all duration-1000 ease-out" strokeLinecap="round" />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-2xl font-black text-gray-800">{persentase}%</span>
+          <span className="text-[9px] text-gray-500 font-bold uppercase tracking-wider">Sehat</span>
+        </div>
+      </div>
+    );
+  };
+
+  const YearlyLineChart = ({ breakdownsData }) => {
+    const months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Ags','Sep','Okt','Nov','Des'];
+    const maxVal = Math.max(...breakdownsData, 5); 
+    const height = 150;
+    const width = 600;
+    
+    // Generate SVG path for line
+    const points = breakdownsData.map((val, i) => {
+       const x = (i / 11) * width;
+       const y = height - (val / maxVal) * height;
+       return `${x},${y}`;
+    }).join(' ');
+
+    return (
+      <div className="w-full overflow-x-auto bg-white p-4 rounded-xl border mt-4">
+         <h4 className="font-bold text-gray-700 mb-6 text-center text-sm">Tren Breakdown Mesin (1 Tahun)</h4>
+         <div className="min-w-[500px]">
+           <svg viewBox={`-10 -20 ${width + 20} ${height + 50}`} className="w-full h-auto">
+              {/* Grid Lines Y */}
+              {[0, 0.5, 1].map(ratio => (
+                 <g key={ratio}>
+                   <line x1="0" y1={height * ratio} x2={width} y2={height * ratio} stroke="#e5e7eb" strokeDasharray="4" />
+                   <text x="-5" y={(height * ratio) + 3} fontSize="10" textAnchor="end" fill="#9ca3af">{Math.round(maxVal - (maxVal * ratio))}</text>
+                 </g>
+              ))}
+              
+              {/* Line Graph */}
+              <polyline fill="none" stroke="#3b82f6" strokeWidth="3" points={points} className="drop-shadow-md" strokeLinecap="round" strokeLinejoin="round" />
+              
+              {/* Points & X-Axis Labels */}
+              {breakdownsData.map((val, i) => {
+                 const cx = (i / 11) * width;
+                 const cy = height - (val / maxVal) * height;
+                 return (
+                   <g key={i}>
+                      <circle cx={cx} cy={cy} r="5" fill="#ffffff" stroke="#2563eb" strokeWidth="2" className="hover:r-7 transition-all cursor-pointer" />
+                      {val > 0 && <text x={cx} y={cy - 12} fontSize="10" fontWeight="bold" textAnchor="middle" fill="#1e40af">{val}</text>}
+                      <text x={cx} y={height + 20} fontSize="10" textAnchor="middle" fill="#6b7280" fontWeight="500">{months[i]}</text>
+                   </g>
+                 )
+              })}
+           </svg>
+         </div>
       </div>
     );
   };
@@ -378,17 +401,21 @@ export default function App() {
           ) : users.length === 0 ? (
             <div className="text-center p-4 bg-yellow-50 border border-yellow-200 rounded-lg mb-4">
               <p className="text-yellow-800 text-sm mb-3 font-bold">Database masih kosong!</p>
-              <button onClick={seedDatabase} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow hover:bg-blue-700 w-full">Setup Database Awal</button>
+              <button onClick={async () => {
+                 await addDoc(colRef('cmms_factories'), { name: 'Pabrik A' });
+                 await addDoc(colRef('cmms_users'), { username: 'admin', password: '123', role: 'admin', name: 'Super Admin', factory: 'All' });
+                 showMessage('Berhasil', 'Database awal berhasil dibuat! Silakan login dengan akun: admin / 123', 'success');
+              }} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow w-full">Setup Database Awal</button>
             </div>
           ) : (
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700">Username</label>
-                <input type="text" name="username" required className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" />
+                <input type="text" name="username" required className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">Password</label>
-                <input type="password" name="password" required className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" />
+                <input type="password" name="password" required className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
               <button type="submit" className="w-full flex justify-center py-3 px-4 rounded-lg shadow-md text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 transition-colors">Masuk Sistem</button>
             </form>
@@ -398,7 +425,7 @@ export default function App() {
     );
   }
 
-  // --- KOMPONEN MENU UTAMA ---
+  // --- KOMPONEN MENU ---
   const Dashboard = () => {
     const [viewMode, setViewMode] = useState('overview'); 
     const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -428,14 +455,6 @@ export default function App() {
     const periodLTI = ltiLogs.filter(l => l.factory === (currentUser.factory === 'All' ? l.factory : currentUser.factory) && l.period === periodStr)
                              .reduce((sum, log) => sum + Number(log.count), 0);
 
-    const handleInputLTI = async () => {
-       const val = window.prompt(`Masukkan jumlah Kejadian LTI (Kecelakaan Kerja) untuk periode ${periodStr}:`, "0");
-       if(val !== null && !isNaN(val) && val.trim() !== '') {
-          await addDoc(colRef('cmms_lti_logs'), { period: periodStr, count: Number(val), factory: currentUser.factory === 'All' ? factories[0]?.name : currentUser.factory, recordedBy: currentUser.name, timestamp: new Date().toISOString() });
-          showMessage('Tersimpan', 'Data LTI berhasil ditambahkan.', 'success');
-       }
-    };
-
     let totalRepairHours = 0;
     let resolvedCount = 0;
     periodBreakdowns.forEach(b => {
@@ -448,8 +467,8 @@ export default function App() {
          }
       }
     });
+    
     const kpiMTTR = resolvedCount > 0 ? (totalRepairHours / resolvedCount).toFixed(1) : 0;
-
     const workingHoursPerPeriod = isYearly ? 2080 : 160; 
     const totalMachineHours = availableMachines.length * workingHoursPerPeriod;
     const totalFailures = periodBreakdowns.length;
@@ -462,6 +481,7 @@ export default function App() {
     const kpiPM = totalScheduledPM > 0 ? Math.round((completedPM / totalScheduledPM) * 100) : 100;
     const kpiBacklog = periodBreakdowns.filter(b => b.status === 'Open').length;
 
+    // Untuk Top 5
     const machineErrorCounts = {};
     breakdowns.filter(b => availableMachines.find(m => m.id === b.machineId)).forEach(b => {
        const mName = machines.find(m => m.id === b.machineId)?.name || 'Unknown';
@@ -469,9 +489,28 @@ export default function App() {
     });
     const sortedBadActors = Object.keys(machineErrorCounts).map(key => ({ name: key, jumlah: machineErrorCounts[key] })).sort((a, b) => b.jumlah - a.jumlah).slice(0, 5);
     const maxErrors = sortedBadActors.length > 0 ? sortedBadActors[0].jumlah : 1;
+    
     const totalMesin = availableMachines.length;
     const mesinRusak = new Set(openBreakdowns.map(b => b.machineId)).size;
     const persentaseSehat = totalMesin === 0 ? 100 : Math.round(((totalMesin - mesinRusak) / totalMesin) * 100);
+
+    // Data Line Chart Tahunan
+    const getYearlyData = () => {
+       const data = Array(12).fill(0);
+       breakdowns.forEach(b => {
+          if (availableMachines.find(m => m.id === b.machineId) && b.date.includes(selectedYear)) {
+             // Ekstrak bulan dari format tgl (asumsi "DD/MM/YYYY" atau "YYYY-MM-DD")
+             let monthIndex = -1;
+             if (b.date.includes('-')) {
+                monthIndex = parseInt(b.date.split('-')[1], 10) - 1;
+             } else if (b.date.includes('/')) {
+                monthIndex = parseInt(b.date.split('/')[1], 10) - 1;
+             }
+             if (monthIndex >= 0 && monthIndex <= 11) data[monthIndex]++;
+          }
+       });
+       return data;
+    };
 
     return (
       <div className="space-y-6">
@@ -506,41 +545,66 @@ export default function App() {
             </div>
 
             {['admin', 'teknisi'].includes(currentUser.role) && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                 <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
-                    <h3 className="font-bold text-gray-800 mb-4 border-b pb-2">Kesehatan Mesin Realtime</h3>
-                    <div className="flex flex-col justify-center items-center py-6">
-                       <div className="w-full bg-gray-200 rounded-full h-8 mb-4 overflow-hidden relative">
-                         <div className="bg-green-500 h-8 flex items-center justify-end pr-2 text-white font-bold text-xs transition-all duration-1000" style={{ width: `${persentaseSehat}%` }}>
-                           {persentaseSehat > 10 && `${persentaseSehat}% SEHAT`}
-                         </div>
-                       </div>
-                       <div className="flex justify-between w-full text-sm text-gray-600 font-medium px-2">
-                         <span>{totalMesin - mesinRusak} Mesin Operasi</span>
-                         <span className="text-red-500">{mesinRusak} Mesin Breakdown</span>
-                       </div>
-                    </div>
-                 </div>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                {/* Visual Kesehatan Mesin - Donut Chart Asli */}
+                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center col-span-1">
+                  <h3 className="font-bold text-gray-800 mb-4 w-full border-b pb-2">Status Mesin Realtime</h3>
+                  <div className="py-4">
+                     <DonutChart persentase={persentaseSehat} />
+                  </div>
+                  <div className="flex gap-4 w-full justify-center text-sm font-bold mt-2 bg-gray-50 py-2 rounded-lg">
+                     <div className="flex items-center text-green-700"><span className="w-3 h-3 bg-green-500 rounded-full mr-2"></span>{totalMesin - mesinRusak} OK</div>
+                     <div className="flex items-center text-red-700"><span className="w-3 h-3 bg-red-500 rounded-full mr-2"></span>{mesinRusak} NG</div>
+                  </div>
+                </div>
 
-                 <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
-                    <h3 className="font-bold text-gray-800 mb-4 border-b pb-2">Top 5 Sering Rusak (All Time)</h3>
-                    <div className="space-y-3">
-                       {sortedBadActors.length > 0 ? sortedBadActors.map((actor, idx) => {
-                          const barWidth = Math.max((actor.jumlah / maxErrors) * 100, 10);
-                          return (
-                            <div key={idx} className="flex flex-col text-sm">
-                               <div className="flex justify-between mb-1">
-                                 <span className="font-bold text-gray-700">{actor.name}</span>
-                                 <span className="text-gray-500">{actor.jumlah}x Rusak</span>
+                {/* Top 5 Mesin Sering Rusak */}
+                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 col-span-1 lg:col-span-2">
+                  <h3 className="font-bold text-gray-800 mb-4 border-b pb-2"><i className="fa-solid fa-ranking-star text-yellow-500 mr-2"></i> Top 5 Mesin Sering Rusak</h3>
+                  <div className="space-y-4">
+                     {sortedBadActors.length > 0 ? sortedBadActors.map((actor, idx) => {
+                        const barWidth = Math.max((actor.jumlah / maxErrors) * 100, 5);
+                        const colors = ['bg-red-500', 'bg-orange-500', 'bg-yellow-500', 'bg-blue-500', 'bg-gray-400'];
+                        const medals = ['text-yellow-400', 'text-gray-300', 'text-amber-600', 'text-gray-400', 'text-gray-400'];
+                        
+                        return (
+                          <div key={idx} className="flex items-center gap-3">
+                             <div className="w-6 text-center font-black text-lg"><i className={`fa-solid fa-medal ${medals[idx]}`}></i></div>
+                             <div className="flex-1">
+                               <div className="flex justify-between mb-1 text-sm">
+                                 <span className="font-bold text-gray-800">{actor.name}</span>
+                                 <span className="text-gray-600 font-bold bg-gray-100 px-2 rounded-lg border">{actor.jumlah}x Rusak</span>
                                </div>
-                               <div className="w-full bg-gray-100 rounded-full h-3">
-                                 <div className="bg-blue-500 h-3 rounded-full" style={{ width: `${barWidth}%` }}></div>
+                               <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
+                                 <div className={`h-2.5 rounded-full ${colors[idx]} transition-all duration-1000`} style={{ width: `${barWidth}%` }}></div>
                                </div>
-                            </div>
-                          )
-                       }) : <p className="text-center text-sm text-gray-400 py-6">Belum ada riwayat kerusakan.</p>}
+                             </div>
+                          </div>
+                        )
+                     }) : <p className="text-center text-sm text-gray-400 py-6 italic">Belum ada data kerusakan tercatat.</p>}
+                  </div>
+                </div>
+
+                {/* Aktivitas Harian Teknisi (Khusus Admin) */}
+                {currentUser.role === 'admin' && (
+                  <div className="bg-white p-5 rounded-xl shadow-sm border border-blue-100 col-span-1 lg:col-span-3 flex flex-col mt-2">
+                    <h3 className="font-bold text-blue-800 mb-4 flex items-center border-b pb-2"><i className="fa-solid fa-list-check mr-2"></i> Aktivitas Harian Teknisi (Hari Ini)</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 max-h-60 overflow-y-auto pr-2">
+                      {dailyActivities.filter(a => filterByDate(a.date, new Date().toISOString().split('T')[0], false) && availableMachines.find(m => m.factory === a.factory || a.factory === 'All')).map(act => (
+                        <div key={act.id} className="p-4 bg-blue-50 border border-blue-100 rounded-xl shadow-sm relative">
+                          <div className="absolute -top-3 -left-2 text-2xl text-blue-200 opacity-50"><i className="fa-solid fa-quote-left"></i></div>
+                          <div className="flex justify-between items-start mb-2 relative z-10">
+                            <span className="font-bold text-gray-900 text-sm"><i className="fa-solid fa-user-gear text-blue-500 mr-1"></i> {act.teknisi}</span>
+                            <span className="text-[10px] font-bold bg-blue-600 text-white px-2 py-0.5 rounded-full shadow-sm">{act.startTime} - {act.endTime}</span>
+                          </div>
+                          <p className="text-sm text-gray-700 italic relative z-10 leading-snug">"{act.activity}"</p>
+                        </div>
+                      ))}
+                      {dailyActivities.length === 0 && <p className="col-span-full text-sm text-gray-500 italic text-center py-8">Belum ada jurnal disubmit teknisi hari ini.</p>}
                     </div>
-                 </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -600,122 +664,41 @@ export default function App() {
                    <p className="text-[10px] text-gray-400 mt-4 leading-tight">*Rata-rata durasi kecepatan teknisi menyelesaikan perbaikan mesin sejak mesin mati.</p>
                 </div>
 
-                {/* PM Completion Card */}
-                <div className="bg-white p-6 rounded-xl shadow-md border-t-8 border-blue-500">
-                   <div className="flex justify-between items-start mb-4">
-                      <div>
-                        <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">PM Selesai</p>
-                        <p className="text-xs text-gray-400 mt-1">Preventive Completion Rate</p>
-                      </div>
-                      <i className="fa-solid fa-calendar-check text-3xl text-blue-200"></i>
-                   </div>
-                   <div className="flex items-baseline gap-2">
-                     <span className="text-4xl md:text-5xl font-black text-blue-600">{kpiPM}</span>
-                     <span className="text-lg font-bold text-blue-400">%</span>
-                   </div>
-                   <div className="w-full bg-gray-200 rounded-full h-2 mt-4">
-                     <div className={`h-2 rounded-full ${kpiPM < 80 ? 'bg-red-500' : 'bg-blue-500'}`} style={{ width: `${kpiPM}%` }}></div>
-                   </div>
-                   <p className="text-[10px] text-gray-400 mt-2 leading-tight">Terlaksana: {completedPM} dari {totalScheduledPM} Jadwal PM.</p>
-                </div>
-
-                {/* Backlog Work Order Card */}
-                <div className="bg-white p-6 rounded-xl shadow-md border-t-8 border-orange-500">
-                   <div className="flex justify-between items-start mb-4">
-                      <div>
-                        <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">Backlog WO</p>
-                        <p className="text-xs text-gray-400 mt-1">Work Order / Tiket Menggantung</p>
-                      </div>
-                      <i className="fa-solid fa-clipboard-list text-3xl text-orange-200"></i>
-                   </div>
-                   <div className="flex items-baseline gap-2">
-                     <span className="text-4xl md:text-5xl font-black text-orange-600">{kpiBacklog}</span>
-                     <span className="text-lg font-bold text-gray-500">Tiket</span>
-                   </div>
-                   <p className="text-[10px] text-gray-400 mt-4 leading-tight">*Jumlah permintaan perbaikan yang masuk namun belum selesai dikerjakan teknisi di periode ini.</p>
-                </div>
-
                 {/* LTI Card */}
                 <div className="bg-white p-6 rounded-xl shadow-md border-t-8 border-red-600 relative overflow-hidden">
                    <div className="absolute -right-4 -bottom-4 opacity-5"><i className="fa-solid fa-truck-medical text-9xl"></i></div>
                    <div className="flex justify-between items-start mb-4 relative z-10">
                       <div>
                         <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">Insiden LTI</p>
-                        <p className="text-xs text-gray-400 mt-1">Lost Time Incident (Kecelakaan)</p>
+                        <p className="text-xs text-gray-400 mt-1">Lost Time Incident</p>
                       </div>
                       {['admin', 'teknisi'].includes(currentUser.role) && (
-                        <button onClick={handleInputLTI} className="bg-red-100 text-red-700 hover:bg-red-200 px-3 py-1 rounded text-[10px] font-bold border border-red-200">+ Catat LTI</button>
+                        <button onClick={() => {
+                           const val = window.prompt(`Masukkan jumlah Kejadian LTI (Kecelakaan) untuk periode ${periodStr}:`, "0");
+                           if(val !== null && !isNaN(val) && val.trim() !== '') {
+                              addDoc(colRef('cmms_lti_logs'), { period: periodStr, count: Number(val), factory: currentUser.factory === 'All' ? factories[0]?.name : currentUser.factory, recordedBy: currentUser.name, timestamp: new Date().toISOString() });
+                              showMessage('Tersimpan', 'Data LTI berhasil ditambahkan.', 'success');
+                           }
+                        }} className="bg-red-100 text-red-700 hover:bg-red-200 px-3 py-1 rounded text-[10px] font-bold border border-red-200">+ Catat LTI</button>
                       )}
                    </div>
                    <div className="flex items-baseline gap-2 relative z-10">
                      <span className="text-4xl md:text-5xl font-black text-red-600">{periodLTI}</span>
                      <span className="text-lg font-bold text-gray-500">Kejadian</span>
                    </div>
-                   <p className="text-[10px] text-gray-400 mt-4 leading-tight relative z-10">*Kecelakaan kerja yang menyebabkan teknisi/operator kehilangan waktu kerja (Target standard: 0 Kejadian).</p>
+                   <p className="text-[10px] text-gray-400 mt-4 leading-tight relative z-10">*Target standard: 0 Kejadian.</p>
                 </div>
              </div>
+
+             {/* Line Chart Tahunan */}
+             {isYearly && <YearlyLineChart breakdownsData={getYearlyData()} />}
           </div>
         )}
 
-        <div className="bg-gradient-to-r from-blue-50 to-white p-5 md:p-6 rounded-xl shadow-sm mb-6 border border-blue-100">
+        <div className="bg-gradient-to-r from-blue-50 to-white p-5 md:p-6 rounded-xl shadow-sm mb-6 border border-blue-100 mt-6">
           <h3 className="text-lg font-semibold mb-1 text-blue-900">Selamat Datang, {currentUser.name}</h3>
           <p className="text-gray-600 text-sm">Anda login sebagai <strong>{currentUser.role.toUpperCase()}</strong>. Lingkup operasional: <span className="bg-blue-200 text-blue-800 px-2 py-0.5 rounded font-bold">{currentUser.factory}</span>.</p>
         </div>
-
-        {currentUser.role === 'admin' && viewMode === 'overview' && (
-          <div className="space-y-6 animate-[fadeIn_0.3s]">
-            <h3 className="text-xl font-bold text-gray-800 border-b pb-2"><i className="fa-solid fa-chart-line mr-2 text-gray-500"></i> Pantauan Visual & Jurnal Harian</h3>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              
-              {/* Chart Status Mesin (Donut) */}
-              <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center">
-                <h4 className="font-bold text-gray-700 mb-4 w-full text-left">Status Operasional Mesin</h4>
-                <div className="relative w-32 h-32 rounded-full mb-4 flex items-center justify-center shadow-inner" style={{ background: `conic-gradient(#ef4444 0% ${100 - persentaseSehat}%, #22c55e ${100 - persentaseSehat}% 100%)` }}>
-                   <div className="w-24 h-24 bg-white rounded-full flex flex-col items-center justify-center shadow">
-                     <span className="text-2xl font-black text-gray-800">{persentaseSehat}%</span>
-                     <span className="text-[9px] text-gray-500 font-bold uppercase">Sehat</span>
-                   </div>
-                </div>
-                <div className="flex gap-4 w-full justify-center text-xs font-bold mt-2">
-                   <div className="flex items-center text-green-700"><span className="w-3 h-3 bg-green-500 rounded-full mr-2"></span>{totalMesin - mesinRusak} Operasi</div>
-                   <div className="flex items-center text-red-700"><span className="w-3 h-3 bg-red-500 rounded-full mr-2"></span>{mesinRusak} Rusak</div>
-                </div>
-              </div>
-
-              {/* Chart Progress PM (Donut) */}
-              <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center">
-                <h4 className="font-bold text-gray-700 mb-4 w-full text-left">Progress PM Terjadwal</h4>
-                <div className="relative w-32 h-32 rounded-full mb-4 flex items-center justify-center shadow-inner" style={{ background: `conic-gradient(#3b82f6 0% ${kpiPM}%, #e5e7eb ${kpiPM}% 100%)` }}>
-                   <div className="w-24 h-24 bg-white rounded-full flex flex-col items-center justify-center shadow">
-                     <span className="text-2xl font-black text-gray-800">{kpiPM}%</span>
-                     <span className="text-[9px] text-gray-500 font-bold uppercase">Selesai</span>
-                   </div>
-                </div>
-                <div className="flex gap-4 w-full justify-center text-xs font-bold mt-2">
-                   <div className="flex items-center text-blue-700"><span className="w-3 h-3 bg-blue-500 rounded-full mr-2"></span>{completedPM} Selesai</div>
-                   <div className="flex items-center text-gray-500"><span className="w-3 h-3 bg-gray-200 rounded-full mr-2"></span>{totalScheduledPM - completedPM} Pending</div>
-                </div>
-              </div>
-
-              {/* Daftar Daily Activity Teknisi */}
-              <div className="bg-white p-5 rounded-xl shadow-sm border border-blue-100 lg:col-span-1 flex flex-col">
-                <h4 className="font-bold text-blue-800 mb-4 flex items-center border-b pb-2"><i className="fa-solid fa-list-check mr-2"></i> Jurnal Teknisi Hari Ini</h4>
-                <div className="space-y-3 max-h-60 overflow-y-auto pr-2 flex-1">
-                  {dailyActivities.filter(a => filterByDate(a.date, new Date().toISOString().split('T')[0], false) && availableMachines.find(m => m.factory === a.factory || a.factory === 'All')).map(act => (
-                    <div key={act.id} className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-sm">
-                      <div className="flex justify-between font-bold text-gray-800 mb-1">
-                        <span>{act.teknisi}</span>
-                        <span className="text-[10px] bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full">{act.startTime} - {act.endTime}</span>
-                      </div>
-                      <p className="text-xs text-gray-700 italic">"{act.activity}"</p>
-                    </div>
-                  ))}
-                  {dailyActivities.length === 0 && <p className="text-sm text-gray-500 italic text-center py-8">Belum ada jurnal hari ini.</p>}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     );
   };
@@ -957,8 +940,6 @@ export default function App() {
     const [selectedMachineParams, setSelectedMachineParams] = useState(null);
     const [tempParams, setTempParams] = useState([]);
     const [newParamText, setNewParamText] = useState('');
-    
-    // Fitur Filter & Search Mesin
     const [filterFactory, setFilterFactory] = useState('All');
     const [searchMachine, setSearchMachine] = useState('');
 
@@ -1129,8 +1110,6 @@ export default function App() {
     const [activeTab, setActiveTab] = useState('stok'); 
     const [editSpId, setEditSpId] = useState(null);
     const [editSpForm, setEditSpForm] = useState({ code: '', name: '', factory: '', unit: '' });
-    
-    // Search by Name feature
     const [searchPart, setSearchPart] = useState('');
 
     const handleAddSparepart = async (e) => {
@@ -1178,7 +1157,6 @@ export default function App() {
       });
     };
 
-    // Filter parts by Search Query (Name)
     const filteredParts = spareparts.filter(sp => sp.name.toLowerCase().includes(searchPart.toLowerCase()));
 
     return (
@@ -1312,8 +1290,6 @@ export default function App() {
     const [newTaskText, setNewTaskText] = useState('');
     const [editSchId, setEditSchId] = useState(null);
     const [editSchForm, setEditSchForm] = useState({ title: '', date: '' });
-    
-    // Fitur Filter Pabrik di Jadwal PM
     const [filterFactory, setFilterFactory] = useState('All');
 
     const handleCreateSchedule = async (e) => {
@@ -1500,876 +1476,6 @@ export default function App() {
     );
   };
 
-  const UserRequestPerbaikan = () => {
-    const [formData, setFormData] = useState({ machineId: '', description: '' });
-    const availableMachines = getAvailableMachines();
-
-    const handleSubmit = async (e) => {
-      e.preventDefault();
-      await addDoc(colRef('cmms_breakdowns'), {
-        date: new Date().toLocaleString(), ...formData, status: 'Open', reportedBy: currentUser.name, requestBy: currentUser.name, analysis: '', partsReplaced: '', startTime: '', endTime: ''
-      });
-      showMessage('Terkirim', 'Request perbaikan berhasil dikirim ke Teknisi.', 'success');
-      setFormData({ machineId: '', description: '' });
-    };
-
-    return (
-      <div className="space-y-6">
-        <h2 className="text-2xl font-bold text-gray-800">Lapor Kendala Mesin</h2>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white p-4 md:p-8 rounded-xl shadow-lg border-t-8 border-red-500 h-fit">
-            <h3 className="font-bold text-xl mb-6 text-gray-800"><i className="fa-solid fa-bullhorn text-red-500 mr-2"></i> Buat Laporan Baru</h3>
-            <form onSubmit={handleSubmit} className="space-y-5">
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">Pilih Aset Mesin ({currentUser.factory})</label>
-                <select required className="w-full border-2 border-gray-200 p-3 rounded-lg" value={formData.machineId} onChange={e => setFormData({...formData, machineId: e.target.value})}>
-                  <option value="">-- Pilih mesin --</option>
-                  {availableMachines.map(m => <option key={m.id} value={m.id}>{m.code} - {m.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">Deskripsi Kerusakan/Kendala</label>
-                <textarea required rows="4" className="w-full border-2 border-gray-200 p-3 rounded-lg" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})}></textarea>
-              </div>
-              <button type="submit" className="bg-red-600 text-white px-4 py-4 rounded-xl w-full font-bold shadow-lg"><i className="fa-solid fa-paper-plane mr-2"></i> Kirim Laporan</button>
-            </form>
-          </div>
-          <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm overflow-hidden flex flex-col max-h-[600px]">
-            <h3 className="font-bold text-lg mb-4 text-gray-800">Status Laporan Anda</h3>
-            <div className="space-y-4 overflow-y-auto pr-2">
-              {breakdowns.filter(b => b.reportedBy === currentUser.name).slice().reverse().map(b => {
-                const machine = machines.find(m => m.id === b.machineId);
-                return (
-                  <div key={b.id} className={`p-4 border rounded-xl shadow-sm ${b.status === 'Open' ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'}`}>
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="font-bold text-gray-900">{machine?.name}</span>
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[10px] px-2 py-1 rounded-full font-bold uppercase ${b.status === 'Open' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{b.status}</span>
-                        {b.status === 'Open' && (
-                          <button onClick={() => handleDeleteBreakdown(b.id, machine?.name)} title="Batalkan Request" className="text-red-500 hover:text-red-700"><i className="fa-solid fa-trash"></i></button>
-                        )}
-                      </div>
-                    </div>
-                    <div className="bg-white p-3 rounded border text-sm text-gray-700 mb-2 italic">"{b.description}"</div>
-                    
-                    {/* Tombol Chat di sisi User/Pelapor */}
-                    {b.status === 'Open' && (
-                       <button onClick={() => setChatTicket(b)} className="mb-3 text-xs text-blue-600 font-bold hover:underline bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 flex items-center">
-                         <i className="fa-regular fa-comments mr-1.5"></i> Balas/Lihat Pesan Teknisi {(b.comments?.length > 0) ? `(${b.comments.length})` : ''}
-                       </button>
-                    )}
-                    
-                    {b.status === 'Selesai Diperbaiki' && <div className="text-xs text-green-800 font-medium mb-2"><i className="fa-solid fa-check mr-1"></i> Telah diperbaiki oleh: {b.resolvedBy}</div>}
-                    <div className="text-[10px] text-gray-500 font-medium">{b.date}</div>
-                  </div>
-                )
-              })}
-              {breakdowns.filter(b => b.reportedBy === currentUser.name).length === 0 && <p className="text-center py-8 text-gray-400 italic">Belum ada laporan diajukan.</p>}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const PenangananKerusakan = () => {
-    const availableMachines = getAvailableMachines();
-    const [resolveId, setResolveId] = useState(null);
-    const [resolveData, setResolveData] = useState({ analysis: '', partsReplaced: '', startDate: '', startTime: '', endTime: '' });
-
-    const handleResolveSubmit = async (e, bId) => {
-      e.preventDefault();
-      showConfirm('Selesaikan Perbaikan?', 'Data penanganan ini akan disimpan permanen.', async () => {
-        await updateDoc(docRef('cmms_breakdowns', bId), {
-          status: 'Selesai Diperbaiki', 
-          resolvedBy: currentUser.name, 
-          resolveDate: new Date().toLocaleString(),
-          analysis: resolveData.analysis,
-          partsReplaced: resolveData.partsReplaced,
-          startTime: `${resolveData.startDate} ${resolveData.startTime}`,
-          endTime: `${resolveData.startDate} ${resolveData.endTime}`
-        });
-        setResolveId(null);
-        showMessage('Selesai', 'Perbaikan berhasil dicatat ke Database.', 'success');
-      });
-    };
-
-    return (
-      <div className="space-y-6">
-        <h2 className="text-2xl font-bold text-gray-800">Penanganan Breakdown Mesin</h2>
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border-t-4 border-red-500">
-            <h3 className="font-semibold text-lg mb-4 text-red-700 border-b pb-2"><i className="fa-solid fa-screwdriver-wrench mr-2"></i> Antrean Pending (Open)</h3>
-            <div className="space-y-4">
-              {breakdowns.filter(b => b.status === 'Open' && availableMachines.find(m => m.id === b.machineId)).map(b => {
-                const machine = machines.find(m => m.id === b.machineId);
-                const isResolving = resolveId === b.id;
-                return (
-                  <div key={b.id} className={`p-4 rounded-xl border ${isResolving ? 'border-blue-400 bg-blue-50' : 'border-red-200 bg-white'}`}>
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="font-bold text-gray-900 text-lg block">{machine?.name}</span>
-                      <span className="text-[10px] font-bold text-white bg-red-500 px-2 py-0.5 rounded">{machine?.factory}</span>
-                    </div>
-                    <div className="bg-gray-50 border p-3 rounded-lg mb-3 relative">
-                      <span className="absolute -top-2 left-3 bg-gray-50 text-[10px] font-bold text-gray-400 px-1">Lapor: {b.requestBy}</span>
-                      <p className="text-sm text-gray-800 mt-1">{b.description}</p>
-                    </div>
-                    
-                    {/* Tombol Diskusi di sisi Teknisi */}
-                    <button onClick={() => setChatTicket(b)} className="mb-3 w-full border border-gray-300 bg-gray-50 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 text-gray-700 font-bold px-4 py-2 rounded-lg text-sm transition-colors flex justify-center items-center">
-                       <i className="fa-regular fa-comments mr-2"></i> Diskusi Tiket {(b.comments?.length > 0) && <span className="ml-2 bg-blue-500 text-white text-[10px] px-2 py-0.5 rounded-full">{b.comments.length}</span>}
-                    </button>
-                    
-                    {!isResolving ? (
-                      <button onClick={() => {setResolveId(b.id); setResolveData({ analysis: '', partsReplaced: '', startDate: new Date().toISOString().split('T')[0], startTime: '', endTime: '' })}} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-3 rounded-lg transition-colors"><i className="fa-solid fa-hand-pointer mr-2"></i> Ambil Pekerjaan Ini</button>
-                    ) : (
-                      <form onSubmit={(e) => handleResolveSubmit(e, b.id)} className="bg-white p-4 rounded-lg border-2 border-blue-200 mt-4 shadow-inner">
-                        <div className="space-y-4">
-                          <div>
-                            <label className="block text-xs font-bold mb-1">Tindakan Perbaikan</label>
-                            <textarea required className="w-full border p-2 text-sm rounded" rows="2" value={resolveData.analysis} onChange={e => setResolveData({...resolveData, analysis: e.target.value})}></textarea>
-                          </div>
-                          <div>
-                            <label className="block text-xs font-bold mb-1">Part Diganti (Jika ada)</label>
-                            <input type="text" className="w-full border p-2 text-sm rounded" value={resolveData.partsReplaced} onChange={e => setResolveData({...resolveData, partsReplaced: e.target.value})} />
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                            <div><label className="block text-[9px] font-bold uppercase">Tanggal</label><input required type="date" className="w-full border p-2 text-sm rounded" value={resolveData.startDate} onChange={e => setResolveData({...resolveData, startDate: e.target.value})} /></div>
-                            <div className="grid grid-cols-2 sm:grid-cols-1 gap-2">
-                              <div><label className="block text-[9px] font-bold uppercase">Jam Mulai</label><input required type="time" className="w-full border p-2 text-sm rounded" value={resolveData.startTime} onChange={e => setResolveData({...resolveData, startTime: e.target.value})} /></div>
-                              <div><label className="block text-[9px] font-bold uppercase">Selesai</label><input required type="time" className="w-full border p-2 text-sm rounded" value={resolveData.endTime} onChange={e => setResolveData({...resolveData, endTime: e.target.value})} /></div>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex gap-2 mt-4">
-                          <button type="submit" className="flex-1 bg-green-600 text-white font-bold py-2 rounded text-sm">Selesaikan</button>
-                          <button type="button" onClick={() => setResolveId(null)} className="bg-gray-200 text-gray-700 font-bold px-4 py-2 rounded text-sm">Batal</button>
-                        </div>
-                      </form>
-                    )}
-                  </div>
-                )
-              })}
-              {breakdowns.filter(b => b.status === 'Open' && availableMachines.find(m => m.id === b.machineId)).length === 0 && <p className="text-center py-6 text-gray-400 italic">Tidak ada laporan kerusakan.</p>}
-            </div>
-          </div>
-          <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border-t-4 border-green-500">
-            <h3 className="font-semibold text-lg mb-4 text-green-700 border-b pb-2"><i className="fa-solid fa-clock-rotate-left mr-2"></i> Histori Pekerjaan Selesai</h3>
-            <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
-              {breakdowns.filter(b => b.status === 'Selesai Diperbaiki' && availableMachines.find(m => m.id === b.machineId)).slice().reverse().map(b => {
-                const machine = machines.find(m => m.id === b.machineId);
-                return (
-                  <div key={b.id} className="p-4 border bg-white rounded-xl shadow-sm">
-                    <span className="font-bold text-gray-900 block">{machine?.name}</span>
-                    <p className="text-sm text-gray-600 mb-2 italic">Lap: "{b.description}"</p>
-                    <div className="text-sm bg-green-50 p-3 rounded-lg border border-green-100 text-gray-800">
-                      <p className="mb-1"><span className="font-bold text-green-800 text-[10px] uppercase block">Tindakan:</span> {b.analysis}</p>
-                      <p><span className="font-bold text-green-800 text-[10px] uppercase block">Part Ganti:</span> {b.partsReplaced || '-'}</p>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const TeknisiDailyActivity = () => {
-    const [formData, setFormData] = useState({ date: new Date().toISOString().split('T')[0], startTime: '', endTime: '', activity: '' });
-    const handleSubmit = async (e) => {
-      e.preventDefault();
-      await addDoc(colRef('cmms_dailyActivities'), { teknisi: currentUser.name, factory: currentUser.factory, ...formData });
-      showMessage('Tersimpan', 'Aktivitas harian disinkronkan ke Database.', 'success');
-      setFormData({ ...formData, startTime: '', endTime: '', activity: '' });
-    };
-    const myActivities = dailyActivities.filter(a => a.teknisi === currentUser.name);
-
-    return (
-      <div className="space-y-6">
-        <div className="bg-blue-900 text-white p-6 rounded-xl shadow-md"><h2 className="text-2xl font-bold">Jurnal Aktivitas Harian</h2></div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border lg:col-span-1 h-fit">
-            <h3 className="font-bold text-lg mb-5 border-b pb-2"><i className="fa-solid fa-pen-clip mr-2 text-blue-500"></i> Entri Baru</h3>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <input required type="date" className="w-full border-2 p-3 rounded-lg text-sm" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
-              <div className="grid grid-cols-2 gap-3">
-                <input required type="time" className="w-full border-2 p-3 rounded-lg text-sm" value={formData.startTime} onChange={e => setFormData({...formData, startTime: e.target.value})} />
-                <input required type="time" className="w-full border-2 p-3 rounded-lg text-sm" value={formData.endTime} onChange={e => setFormData({...formData, endTime: e.target.value})} />
-              </div>
-              <textarea required rows="4" className="w-full border-2 p-3 rounded-lg text-sm" placeholder="Deskripsi aktivitas..." value={formData.activity} onChange={e => setFormData({...formData, activity: e.target.value})}></textarea>
-              <button type="submit" className="w-full bg-gray-900 text-white py-3 rounded-lg font-bold"><i className="fa-solid fa-floppy-disk mr-2"></i> Simpan Jurnal</button>
-            </form>
-          </div>
-          <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm lg:col-span-2 overflow-auto max-h-[650px]">
-            <h3 className="font-bold text-lg mb-4">Riwayat Jurnal Anda</h3>
-            <div className="space-y-4">
-              {myActivities.slice().reverse().map(act => (
-                <div key={act.id} className="flex p-4 border rounded-xl shadow-sm bg-gray-50">
-                  <div className="mr-4 flex flex-col items-center justify-center border-r border-gray-300 pr-4 min-w-[60px]">
-                    <span className="text-xl font-black text-blue-600">{act.date.split('-')[2]}</span>
-                  </div>
-                  <div className="flex-1">
-                    <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-1 rounded"><i className="fa-regular fa-clock mr-1"></i> {act.startTime} - {act.endTime}</span>
-                    <p className="text-sm text-gray-800 font-medium mt-2 leading-relaxed">{act.activity}</p>
-                  </div>
-                </div>
-              ))}
-              {myActivities.length === 0 && <p className="text-center py-6 text-gray-400">Jurnal kosong.</p>}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const CekHarian = () => {
-    const [selectedMachine, setSelectedMachine] = useState(null);
-    const [checkData, setCheckData] = useState({});
-    const [showScanner, setShowScanner] = useState(false);
-    const availableMachines = getAvailableMachines();
-    const params = selectedMachine ? dailyParams.filter(p => p.machineId === selectedMachine) : [];
-
-    // --- CEK DATA HARI INI ---
-    const todayStr = new Date().toISOString().split('T')[0];
-    const checkedTodayIds = new Set(dailyChecks.filter(c => c.date === todayStr).map(c => c.machineId));
-
-    // --- GROUPING MESIN PER AREA ---
-    const groupedMachines = availableMachines.reduce((acc, m) => {
-       const area = m.location || 'Area Lainnya';
-       if (!acc[area]) acc[area] = [];
-       acc[area].push(m);
-       return acc;
-    }, {});
-    
-    const sortedAreas = Object.keys(groupedMachines).sort();
-
-    const handleSaveCheck = async (e) => {
-      e.preventDefault();
-      await addDoc(colRef('cmms_dailyChecks'), { date: todayStr, machineId: selectedMachine, teknisi: currentUser.name, results: checkData });
-      showMessage('Selesai', 'Data checklist harian disubmit ke Database.', 'success');
-      setSelectedMachine(null);
-      setCheckData({});
-    };
-
-    const handleQRSuccess = (code) => {
-       const m = availableMachines.find(x => x.code === code);
-       if (m) {
-          if (checkedTodayIds.has(m.id)) {
-             showMessage('Sudah Dicek', `Mesin ${m.name} sudah diperiksa hari ini. Tidak bisa diinput ganda.`, 'warning');
-             setShowScanner(false);
-             return;
-          }
-          setSelectedMachine(m.id);
-          setCheckData({});
-          setShowScanner(false);
-          showMessage('Scan Sukses', `Mesin terpilih: ${m.name}`, 'success');
-       } else {
-          showMessage('Scan Gagal', `Mesin dengan kode ${code} tidak ditemukan.`, 'error');
-       }
-    };
-
-    return (
-      <div className="space-y-6">
-        {showScanner && <CameraQRScanner onScanSuccess={handleQRSuccess} onClose={() => setShowScanner(false)} />}
-        
-        <div className="flex justify-between items-center">
-           <h2 className="text-2xl font-bold text-gray-800">Form Checklist Harian</h2>
-           <button onClick={() => setShowScanner(true)} className="bg-gray-800 hover:bg-black text-white px-4 py-2 rounded shadow-md text-sm font-bold flex items-center">
-              <i className="fa-solid fa-qrcode mr-2"></i> Scan QR Aset
-           </button>
-        </div>
-
-        <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-100">
-          <h3 className="text-xs font-bold text-gray-500 uppercase mb-4 border-b pb-2">Atau Pilih Mesin Manual (Per Area)</h3>
-          
-          {sortedAreas.map(area => (
-            <div key={area} className="mb-6">
-              <h4 className="font-bold text-blue-800 bg-blue-50 px-3 py-1.5 rounded inline-block mb-3 uppercase text-xs border border-blue-100 shadow-sm"><i className="fa-solid fa-layer-group mr-2"></i> Area: {area}</h4>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 md:gap-4">
-                {groupedMachines[area].map(m => {
-                  const isChecked = checkedTodayIds.has(m.id);
-                  const isSelected = selectedMachine === m.id;
-                  
-                  let cardStyle = "bg-white hover:border-blue-300 cursor-pointer";
-                  let iconColor = "text-gray-400";
-                  let textColor = "text-gray-800";
-                  
-                  if (isChecked) {
-                     cardStyle = "bg-green-50 border-green-300 cursor-not-allowed opacity-80";
-                     iconColor = "text-green-500";
-                     textColor = "text-green-900";
-                  } else if (isSelected) {
-                     cardStyle = "bg-blue-600 border-blue-600 shadow-lg scale-105 cursor-pointer";
-                     iconColor = "text-white";
-                     textColor = "text-white";
-                  }
-
-                  return (
-                    <div key={m.id} onClick={() => { 
-                         if (isChecked) {
-                            showMessage('Selesai', `Mesin ${m.name} sudah diperiksa hari ini. Tidak perlu diisi ulang.`, 'warning');
-                            return;
-                         }
-                         setSelectedMachine(m.id); 
-                         setCheckData({}); 
-                      }} 
-                      className={`border-2 p-4 rounded-xl flex flex-col items-center text-center transition-all ${cardStyle}`}>
-                      <div className={`text-2xl md:text-3xl mb-2 ${iconColor}`}>
-                         {isChecked ? <i className="fa-solid fa-check-circle"></i> : <i className="fa-solid fa-box"></i>}
-                      </div>
-                      <span className={`text-[10px] md:text-xs font-bold ${textColor}`}>{m.name}</span>
-                      {isChecked && <span className="text-[8px] mt-1.5 bg-green-200 text-green-900 border border-green-400 px-1.5 py-0.5 rounded font-black uppercase tracking-wider shadow-sm">Sudah Dicek</span>}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          ))}
-          {sortedAreas.length === 0 && <p className="text-gray-400 italic text-sm text-center py-4">Belum ada mesin di pabrik ini.</p>}
-        </div>
-
-        {selectedMachine && (
-          <div className="bg-white p-4 md:p-6 rounded-xl shadow-xl border-t-8 border-blue-500 animate-[fadeIn_0.3s]">
-            <h3 className="text-lg md:text-xl font-bold mb-6 flex items-center border-b pb-4"><i className="fa-solid fa-list-check text-blue-500 mr-3"></i> Checklist: {machines.find(m=>m.id === selectedMachine)?.name}</h3>
-            {params.length > 0 ? (
-              <form onSubmit={handleSaveCheck}>
-                <div className="space-y-4 mb-8">
-                  {params.map((p, idx) => {
-                    const status = checkData[p.id]?.status;
-                    return (
-                      <div key={p.id} className="p-4 border-2 rounded-xl bg-gray-50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                        <p className="font-bold text-sm md:text-base flex-1">{idx+1}. {p.name}</p>
-                        <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-                          <label className={`flex-1 sm:flex-none flex justify-center items-center px-4 py-2 rounded-lg cursor-pointer text-sm font-bold border-2 ${status === 'OK' ? 'bg-green-100 text-green-700 border-green-500' : 'bg-white border-gray-200'}`}>
-                            <input type="radio" required name={`param_${p.id}`} className="hidden" onChange={() => setCheckData({...checkData, [p.id]: { status: 'OK', note: checkData[p.id]?.note || '' }})} /> OK
-                          </label>
-                          <label className={`flex-1 sm:flex-none flex justify-center items-center px-4 py-2 rounded-lg cursor-pointer text-sm font-bold border-2 ${status === 'NG' ? 'bg-red-100 text-red-700 border-red-500' : 'bg-white border-gray-200'}`}>
-                            <input type="radio" required name={`param_${p.id}`} className="hidden" onChange={() => setCheckData({...checkData, [p.id]: { status: 'NG', note: checkData[p.id]?.note || '' }})} /> NG (Abnormal)
-                          </label>
-                        </div>
-                        {status === 'NG' && <input type="text" placeholder="Catatan/Temuan..." required className="w-full md:w-48 border-2 border-red-300 p-2 text-sm rounded bg-red-50" onChange={(e) => setCheckData({...checkData, [p.id]: { ...checkData[p.id], note: e.target.value }})} />}
-                      </div>
-                    )
-                  })}
-                </div>
-                <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-xl font-black text-lg shadow-lg">Submit Hasil</button>
-              </form>
-            ) : (
-              <div className="text-center py-12 border-2 border-dashed border-red-200 bg-red-50 rounded-xl"><p className="text-red-800 font-bold">Parameter Mesin Belum Diatur Admin.</p></div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const TeknisiSparepart = () => {
-    const [activeTab, setActiveTab] = useState('ambil');
-    const availableParts = spareparts.filter(sp => sp.factory === currentUser.factory);
-    const [useForm, setUseForm] = useState({ partId: '', qty: '', remarks: '' });
-    const [reqForm, setReqForm] = useState({ partName: '', qty: '', remarks: '' });
-
-    const handleUsePart = async (e) => {
-      e.preventDefault();
-      const part = availableParts.find(p => p.id === useForm.partId);
-      if(!part) return;
-      const qtyNum = Number(useForm.qty);
-      if(qtyNum > part.stock) {
-        showMessage('Gagal', `Stok tidak cukup! (Sisa: ${part.stock} ${part.unit})`, 'error');
-        return;
-      }
-      showConfirm('Ambil Part', `Ambil ${qtyNum} ${part.unit} ${part.name}?`, async () => {
-        await updateDoc(docRef('cmms_spareparts', part.id), { stock: part.stock - qtyNum });
-        await addDoc(colRef('cmms_sparepart_logs'), {
-          partId: part.id, partCode: part.code, partName: part.name, factory: part.factory,
-          date: new Date().toLocaleString(), type: 'OUT', qty: qtyNum, unit: part.unit,
-          remarks: useForm.remarks, user: currentUser.name
-        });
-        showMessage('Berhasil', 'Pengambilan dicatat.', 'success');
-        setUseForm({ partId: '', qty: '', remarks: '' });
-      });
-    };
-
-    const handleRequestPart = async (e) => {
-      e.preventDefault();
-      await addDoc(colRef('cmms_sparepart_requests'), {
-        partName: reqForm.partName, factory: currentUser.factory, qty: reqForm.qty,
-        remarks: reqForm.remarks, status: 'Pending', requestedBy: currentUser.name, date: new Date().toLocaleString()
-      });
-      showMessage('Terkirim', 'Request dikirim ke Admin.', 'success');
-      setReqForm({ partName: '', qty: '', remarks: '' });
-    };
-
-    return (
-      <div className="space-y-6">
-        <h2 className="text-2xl font-bold text-gray-800">Gudang Part ({currentUser.factory})</h2>
-        <div className="flex border-b-2 border-gray-200 mb-4 gap-2 overflow-x-auto">
-           <button onClick={() => setActiveTab('ambil')} className={`whitespace-nowrap px-4 py-3 font-bold rounded-t-lg transition-colors ${activeTab === 'ambil' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-200'}`}><i className="fa-solid fa-box-open mr-2"></i> Ambil Part</button>
-           <button onClick={() => setActiveTab('request')} className={`whitespace-nowrap px-4 py-3 font-bold rounded-t-lg transition-colors ${activeTab === 'request' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-200'}`}><i className="fa-solid fa-cart-plus mr-2"></i> Request Part</button>
-        </div>
-
-        {activeTab === 'ambil' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-             <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border-t-4 border-indigo-500 h-fit">
-                <h3 className="font-semibold text-lg mb-4 text-gray-800"><i className="fa-solid fa-dolly mr-2 text-indigo-500"></i> Form Pengambilan</h3>
-                <form onSubmit={handleUsePart} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold mb-1">Pilih Sparepart</label>
-                    <select required className="w-full border-2 p-3 rounded-lg text-sm bg-gray-50" value={useForm.partId} onChange={e => setUseForm({...useForm, partId: e.target.value})}>
-                      <option value="">-- Pilih Part --</option>
-                      {availableParts.map(sp => <option key={sp.id} value={sp.id}>{sp.code} - {sp.name} (Sisa: {sp.stock})</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold mb-1">Jumlah</label>
-                    <input type="number" required min="1" className="w-full border-2 p-3 rounded-lg text-sm bg-gray-50" value={useForm.qty} onChange={e => setUseForm({...useForm, qty: e.target.value})} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold mb-1">Digunakan Untuk</label>
-                    <textarea required rows="2" className="w-full border-2 p-3 rounded-lg text-sm bg-gray-50" placeholder="Perbaikan mesin A..." value={useForm.remarks} onChange={e => setUseForm({...useForm, remarks: e.target.value})}></textarea>
-                  </div>
-                  <button type="submit" className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg shadow-md hover:bg-indigo-700">Catat Pengambilan</button>
-                </form>
-             </div>
-             
-             <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm flex flex-col max-h-[500px]">
-                <h3 className="font-semibold text-lg mb-4 text-gray-800">Histori Pengambilan</h3>
-                <div className="overflow-y-auto space-y-3 pr-2">
-                  {sparepartLogs.filter(l => l.type === 'OUT' && l.user === currentUser.name).slice().reverse().map(log => (
-                    <div key={log.id} className="p-3 border rounded-lg bg-indigo-50">
-                      <div className="flex justify-between items-start mb-1">
-                        <span className="font-bold text-gray-900">{log.partName} <span className="text-[10px] text-gray-500">({log.partCode})</span></span>
-                        <span className="text-[10px] font-black text-red-600 bg-red-100 px-2 py-0.5 rounded border border-red-200">-{log.qty} {log.unit}</span>
-                      </div>
-                      <p className="text-xs text-gray-700 italic mb-1">Tujuan: {log.remarks}</p>
-                      <span className="text-[9px] text-gray-500 font-bold">{log.date}</span>
-                    </div>
-                  ))}
-                  {sparepartLogs.filter(l => l.type === 'OUT' && l.user === currentUser.name).length === 0 && <p className="text-center py-6 text-gray-400">Kosong</p>}
-                </div>
-             </div>
-          </div>
-        )}
-
-        {activeTab === 'request' && (
-           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border-t-4 border-orange-500 h-fit">
-                <h3 className="font-semibold text-lg mb-4 text-gray-800"><i className="fa-solid fa-cart-plus mr-2 text-orange-500"></i> Request Part Baru</h3>
-                <form onSubmit={handleRequestPart} className="space-y-4">
-                  <div><label className="block text-xs font-bold mb-1">Nama Part</label><input type="text" required className="w-full border-2 p-3 rounded-lg text-sm bg-gray-50" value={reqForm.partName} onChange={e => setReqForm({...reqForm, partName: e.target.value})} /></div>
-                  <div><label className="block text-xs font-bold mb-1">Estimasi Qty</label><input type="text" required className="w-full border-2 p-3 rounded-lg text-sm bg-gray-50" value={reqForm.qty} onChange={e => setReqForm({...reqForm, qty: e.target.value})} /></div>
-                  <div><label className="block text-xs font-bold mb-1">Alasan</label><textarea required rows="2" className="w-full border-2 p-3 rounded-lg text-sm bg-gray-50" value={reqForm.remarks} onChange={e => setReqForm({...reqForm, remarks: e.target.value})}></textarea></div>
-                  <button type="submit" className="w-full bg-orange-600 text-white font-bold py-3 rounded-lg shadow-md">Kirim Request</button>
-                </form>
-              </div>
-
-              <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm flex flex-col max-h-[500px]">
-                <h3 className="font-semibold text-lg mb-4 text-gray-800">Status Request</h3>
-                <div className="overflow-y-auto space-y-3 pr-2">
-                  {sparepartRequests.filter(r => r.requestedBy === currentUser.name).slice().reverse().map(req => (
-                     <div key={req.id} className="p-3 border rounded-lg bg-gray-50 relative">
-                        <span className={`absolute top-2 right-2 text-[9px] font-bold px-2 py-0.5 rounded text-white ${req.status === 'Pending' ? 'bg-orange-500' : 'bg-green-500'}`}>{req.status}</span>
-                        <p className="font-bold text-gray-900 pr-16">{req.partName}</p>
-                        <p className="text-xs text-gray-600 mb-1">Qty: {req.qty}</p>
-                        <p className="text-xs text-gray-700 italic border-t pt-1 mt-1">"{req.remarks}"</p>
-                     </div>
-                  ))}
-                </div>
-              </div>
-           </div>
-        )}
-      </div>
-    );
-  };
-
-  const CetakLaporan = () => {
-    const [activeTab, setActiveTab] = useState('harian');
-    const [filterFactory, setFilterFactory] = useState('All');
-    const [filterMachine, setFilterMachine] = useState('');
-    const [filterMonth, setFilterMonth] = useState('');
-    const [filterYear, setFilterYear] = useState(new Date().getFullYear().toString());
-    
-    const machinesToPrint = filterFactory === 'All' ? machines : machines.filter(m => m.factory === filterFactory);
-    
-    const filteredChecks = dailyChecks.filter(c => {
-      const matchMachine = filterMachine ? c.machineId === filterMachine : machinesToPrint.find(m => m.id === c.machineId);
-      const matchMonth = filterMonth ? c.date.startsWith(filterMonth) : true;
-      return matchMachine && matchMonth;
-    });
-
-    const filteredPMs = pmSchedules.filter(s => {
-      const isDone = s.status === 'Selesai' || s.status === 'Terverifikasi';
-      const matchMachine = filterMachine ? s.machineId === filterMachine : machinesToPrint.find(m => m.id === s.machineId);
-      const matchYear = filterYear ? s.date.startsWith(filterYear) : true;
-      return isDone && matchMachine && matchYear;
-    });
-
-    const filteredSparepartLogs = sparepartLogs.filter(log => {
-       const matchFactory = filterFactory === 'All' ? true : log.factory === filterFactory;
-       let matchDate = true;
-       if(activeTab === 'sparepart') {
-         if (filterMonth) {
-            const [year, month] = filterMonth.split('-');
-            matchDate = log.date.includes(`${month}/${year}`) || log.date.includes(`${year}-${month}`);
-         } else if (filterYear) {
-            matchDate = log.date.includes(filterYear);
-         }
-       }
-       return matchFactory && matchDate;
-    });
-
-    return (
-      <div className="space-y-6">
-        <div className="print:hidden">
-          <div className="bg-gray-800 text-white p-4 md:p-6 rounded-xl mb-6">
-            <h2 className="text-xl md:text-2xl font-bold">Pusat Cetak Dokumen</h2>
-          </div>
-          
-          <div className="flex border-b-2 border-gray-200 mb-6 gap-1 md:gap-2 overflow-x-auto pb-1">
-             <button onClick={() => setActiveTab('harian')} className={`whitespace-nowrap px-4 py-2 md:px-6 md:py-3 text-sm md:text-base font-bold rounded-t-lg transition-colors ${activeTab === 'harian' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-200'}`}><i className="fa-solid fa-clipboard-check mr-1 md:mr-2"></i> Log Harian</button>
-             <button onClick={() => setActiveTab('pm')} className={`whitespace-nowrap px-4 py-2 md:px-6 md:py-3 text-sm md:text-base font-bold rounded-t-lg transition-colors ${activeTab === 'pm' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-200'}`}><i className="fa-solid fa-calendar-check mr-1 md:mr-2"></i> Riwayat PM</button>
-             <button onClick={() => setActiveTab('sparepart')} className={`whitespace-nowrap px-4 py-2 md:px-6 md:py-3 text-sm md:text-base font-bold rounded-t-lg transition-colors ${activeTab === 'sparepart' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-200'}`}><i className="fa-solid fa-boxes-stacked mr-1 md:mr-2"></i> Part</button>
-          </div>
-
-          <div className="bg-white p-4 md:p-6 rounded-xl grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-end mb-6 border">
-            <div>
-              <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Filter Pabrik</label>
-              <select className="border-2 p-2 rounded w-full text-sm" value={filterFactory} onChange={e => {setFilterFactory(e.target.value); setFilterMachine('');}}>
-                <option value="All">Semua Pabrik</option>
-                {factories.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
-              </select>
-            </div>
-            
-            {activeTab !== 'sparepart' && (
-              <div>
-                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Filter Mesin</label>
-                <select className="border-2 p-2 rounded w-full text-sm" value={filterMachine} onChange={e => setFilterMachine(e.target.value)}>
-                  <option value="">-- Semua Mesin --</option>
-                  {machinesToPrint.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                </select>
-              </div>
-            )}
-            
-            {activeTab === 'harian' || activeTab === 'sparepart' ? (
-              <div>
-                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Filter Bulan</label>
-                <input type="month" className="border-2 p-2 rounded w-full text-sm" value={filterMonth} onChange={e => {setFilterMonth(e.target.value); if(activeTab==='sparepart') setFilterYear('');}} />
-              </div>
-            ) : null}
-
-            {activeTab === 'pm' || activeTab === 'sparepart' ? (
-              <div>
-                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Filter Tahun</label>
-                <input type="number" className="border-2 p-2 rounded w-full text-sm" value={filterYear} onChange={e => {setFilterYear(e.target.value); if(activeTab==='sparepart') setFilterMonth('');}} />
-              </div>
-            ) : null}
-            
-            <div className="col-span-full md:col-span-1 md:ml-auto flex flex-col md:flex-row gap-2 w-full">
-               <button onClick={() => window.print()} className="bg-gray-900 hover:bg-black text-white px-4 py-2 rounded-lg font-bold shadow-sm w-full transition-colors flex justify-center items-center"><i className="fa-solid fa-print mr-2"></i> Cetak PDF</button>
-               <button onClick={() => {
-                  if(activeTab === 'harian') exportToCSV(filteredChecks.map(c => ({Tanggal: c.date, Mesin_ID: c.machineId, Nama_Teknisi: c.teknisi, Data_Aktual: JSON.stringify(c.results)})), 'Export_Logsheet_Harian.csv');
-                  if(activeTab === 'pm') exportToCSV(filteredPMs.map(p => ({Tanggal_Tugas: p.date, Judul_Tugas: p.title, Mesin_ID: p.machineId, Dikerjakan_Oleh: p.executedBy, Diverifikasi_Oleh: p.verifiedBy, Status: p.status})), 'Export_Laporan_PM.csv');
-                  if(activeTab === 'sparepart') exportToCSV(filteredSparepartLogs.map(l => ({Tanggal: l.date, Kode_Item: l.partCode, Nama_Part: l.partName, Tipe_Trx: l.type, Jumlah: l.qty, Satuan: l.unit, PIC: l.user, Catatan: l.remarks})), 'Export_Mutasi_Sparepart.csv');
-               }} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-bold shadow-sm w-full transition-colors flex justify-center items-center"><i className="fa-solid fa-file-excel mr-2"></i> Export ke CSV</button>
-            </div>
-          </div>
-        </div>
-
-        {activeTab === 'harian' && (
-          <div className="bg-white p-4 md:p-8 rounded-xl print:p-0 border print:border-0 print:shadow-none shadow-sm">
-            <div className="hidden print:flex items-center justify-between border-b-4 border-gray-900 pb-4 mb-4">
-              <div>
-                 <h1 className="text-2xl font-black uppercase text-gray-900">Logsheet Pengecekan Harian</h1>
-                 <p className="text-sm font-bold text-gray-500 uppercase tracking-widest mt-1">Bulan: {filterMonth || '-'} | Mesin: {machines.find(m=>m.id === filterMachine)?.name || 'Semua (Campur)'}</p>
-              </div>
-              <div className="text-right border-l-2 border-gray-900 pl-4">
-                 <p className="text-[10px] font-bold text-gray-500">AREA LOKASI</p>
-                 <p className="text-lg font-black text-gray-900 uppercase">{filterFactory}</p>
-              </div>
-            </div>
-            
-            {!filterMachine && (
-              <p className="print:hidden text-xs text-orange-600 bg-orange-50 p-2 border border-orange-200 rounded mb-4">
-                <i className="fa-solid fa-circle-info mr-1"></i> <strong>Tips:</strong> Untuk hasil cetak 1 lembar 1 bulan yang rapi, sangat disarankan untuk memilih spesifik 1 mesin pada Filter Mesin di atas.
-              </p>
-            )}
-
-            <div className="overflow-x-auto w-full">
-              <table className="w-full border-collapse border border-gray-900 text-[10px] print:text-[10px]">
-                <thead>
-                  <tr className="bg-gray-200">
-                    <th className="border border-gray-900 p-1.5 w-16 text-center">Tgl</th>
-                    {!filterMachine && <th className="border border-gray-900 p-1.5 w-32">Nama Mesin</th>}
-                    <th className="border border-gray-900 p-1.5 text-left">Hasil Pemeriksaan & Kondisi Parameter Aktual</th>
-                    <th className="border border-gray-900 p-1.5 w-24 text-center">Teknisi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredChecks.length > 0 ? filteredChecks.map(check => {
-                     const machine = machines.find(m => m.id === check.machineId);
-                     const tglParts = check.date.split('-');
-                     const tglTampil = tglParts.length === 3 ? `${tglParts[2]}/${tglParts[1]}` : check.date;
-                     
-                     return (
-                       <tr key={check.id} className="hover:bg-gray-50 print:bg-white break-inside-avoid">
-                          <td className="border border-gray-900 p-1.5 text-center font-black">{tglTampil}</td>
-                          {!filterMachine && <td className="border border-gray-900 p-1.5 font-bold text-[9px]">{machine?.name}</td>}
-                          <td className="border border-gray-900 p-1.5">
-                             <div className="flex flex-wrap gap-1">
-                               {Object.entries(check.results).map(([paramId, res]) => {
-                                  const pName = dailyParams.find(p => p.id === paramId)?.name || 'Param';
-                                  const isOK = res.status === 'OK';
-                                  return (
-                                     <span key={paramId} className={`inline-flex items-center px-1.5 py-0.5 border rounded-[3px] text-[8px] font-bold ${isOK ? 'bg-green-50 text-green-800 border-green-300' : 'bg-red-100 text-red-900 border-red-500'}`}>
-                                       {pName}: {res.status} {res.note && `(${res.note})`}
-                                     </span>
-                                  );
-                               })}
-                               {Object.keys(check.results).length === 0 && <span className="text-[9px] text-gray-400 italic">Tidak ada rincian data cek.</span>}
-                             </div>
-                          </td>
-                          <td className="border border-gray-900 p-1.5 text-center font-bold text-[9px]">{check.teknisi}</td>
-                       </tr>
-                     )
-                  }) : (
-                    <tr><td colSpan={filterMachine ? "3" : "4"} className="border border-gray-900 p-8 text-center text-gray-400 font-bold text-sm">Data logsheet kosong di periode ini.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="hidden print:flex justify-between mt-8 pt-4">
-                <div className="text-center w-40">
-                  <p className="text-[10px] font-bold uppercase text-gray-500 mb-12">Dibuat Oleh</p>
-                  <p className="border-t-2 border-gray-900 pt-1 font-bold text-xs">Teknisi / Operator</p>
-                </div>
-                <div className="text-center w-40">
-                  <p className="text-[10px] font-bold uppercase text-gray-500 mb-12">Diverifikasi Oleh</p>
-                  <p className="border-t-2 border-gray-900 pt-1 font-bold text-xs">Supervisor / SPV</p>
-                </div>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'pm' && (
-          <div className="space-y-12">
-            {filteredPMs.length > 0 ? filteredPMs.map(pm => {
-              const machine = machines.find(m => m.id === pm.machineId);
-              const tasks = pmParams.filter(p => p.scheduleId === pm.id);
-              
-              const qrTeknisiData = encodeURIComponent(`Sign:${pm.executedBy}|Date:${pm.executeDate}|ID:${pm.id}`);
-              const qrSpvData = encodeURIComponent(`VerifiedBy:${pm.verifiedBy}|Date:${pm.verifyDate}|ID:${pm.id}`);
-              const qrTeknisi = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${qrTeknisiData}`;
-              const qrSupervisor = pm.status === 'Terverifikasi' ? `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${qrSpvData}` : null;
-
-              return (
-                <div key={pm.id} className="border-4 border-gray-900 p-8 rounded-xl bg-white break-inside-avoid shadow-sm print:shadow-none relative">
-                  {pm.status === 'Terverifikasi' && (
-                    <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 rotate-[-30deg] opacity-[0.03] print:opacity-10 pointer-events-none z-0">
-                      <span className="text-4xl md:text-8xl font-black uppercase text-gray-900 border-8 border-gray-900 px-6 py-2 rounded-xl whitespace-nowrap">Verified Document</span>
-                    </div>
-                  )}
-
-                  <div className="flex flex-col sm:flex-row justify-between border-b-2 border-gray-900 pb-6 mb-6 relative z-10 gap-4">
-                    <div className="flex-1">
-                      <span className="bg-gray-900 text-white font-bold text-[10px] uppercase tracking-widest px-2 py-1 mb-2 inline-block">Doc ID: PM-{pm.id.toString().slice(-6)}</span>
-                      <h4 className="font-black text-xl md:text-2xl uppercase text-gray-900 leading-tight mb-2">{pm.title}</h4>
-                      <div className="text-gray-800 text-sm p-3 bg-gray-100 border border-gray-300 rounded inline-block print:bg-transparent print:border-gray-900">
-                        <p className="font-bold text-base md:text-lg mb-1"><i className="fa-solid fa-microchip mr-2"></i>{machine?.name || 'Unknown'}</p>
-                        <p className="text-[10px] md:text-xs uppercase tracking-wide">Aset Code: <strong>{machine?.code || '-'}</strong> | Lokasi: <strong>{machine?.factory || '-'}</strong></p>
-                      </div>
-                    </div>
-                    <div className="text-left sm:text-right text-xs md:text-sm sm:border-l-2 border-gray-900 sm:pl-6 flex flex-col justify-center bg-gray-50 p-4 rounded print:bg-transparent print:p-0 print:border-0 w-full sm:w-auto">
-                      <table className="text-left font-medium w-full sm:w-auto">
-                        <tbody>
-                          <tr><td className="pr-4 pb-1 text-gray-500 uppercase text-[10px] md:text-xs">Jadwal</td><td className="font-bold pb-1">: {pm.date}</td></tr>
-                          <tr><td className="pr-4 pb-1 text-gray-500 uppercase text-[10px] md:text-xs">Pengerjaan</td><td className="font-bold pb-1">: {pm.executeDate}</td></tr>
-                          <tr><td className="pr-4 pb-1 text-gray-500 uppercase text-[10px] md:text-xs">Jam</td><td className="font-bold pb-1">: {pm.pmStartTime || '-'} s/d {pm.pmEndTime || '-'}</td></tr>
-                          <tr><td className="pr-4 pt-2 text-gray-500 uppercase text-[10px] md:text-xs border-t border-gray-300">Status</td><td className="font-bold pt-2 uppercase">: {pm.status}</td></tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  <div className="mb-6 relative z-10">
-                    <h5 className="font-bold text-gray-900 bg-gray-200 px-3 py-1 rounded text-xs md:text-sm uppercase tracking-wider inline-block mb-3 border border-gray-400">Daftar SOP Terselesaikan:</h5>
-                    {tasks.length > 0 ? (
-                      <ul className="space-y-1">
-                        {tasks.map((t, idx) => (
-                          <li key={t.id} className="text-xs md:text-sm flex border-b border-gray-200 pb-2 mb-2 items-end">
-                            <span className="font-bold mr-3 text-gray-400">{idx+1}.</span> 
-                            <span className="flex-1 text-gray-800">{t.task}</span>
-                            <span className="font-black text-gray-900 bg-gray-100 px-2 py-0.5 rounded border border-gray-400 text-[10px] md:text-xs"><i className="fa-regular fa-square-check mr-1"></i> DONE</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : <p className="text-sm italic p-4 border border-dashed rounded">Tidak ada daftar SOP.</p>}
-                  </div>
-
-                  <div className="mb-8 relative z-10">
-                    <h5 className="font-bold text-gray-900 bg-gray-200 px-3 py-1 rounded text-xs md:text-sm uppercase tracking-wider inline-block mb-3 border border-gray-400">Catatan Kondisi Aktual:</h5>
-                    <div className="bg-gray-50 p-4 border border-gray-400 min-h-[80px] text-xs md:text-sm italic font-medium rounded">{pm.executionNote || '-'}</div>
-                  </div>
-
-                  <div className="flex flex-row justify-between mt-8 pt-8 border-t-2 border-gray-900 relative z-10">
-                    <div className="text-center w-1/2 sm:w-56">
-                      <p className="text-[10px] md:text-xs font-bold mb-2 uppercase text-gray-500">Teknisi Pelaksana</p>
-                      <div className="h-20 w-20 md:h-32 md:w-32 mx-auto border p-1 bg-white rounded shadow-sm"><img src={qrTeknisi} alt="QR" className="w-full h-full mix-blend-multiply" crossOrigin="anonymous" /></div>
-                      <p className="font-black text-gray-900 uppercase text-[10px] md:text-sm mt-2 border-t pt-1 break-words">{pm.executedBy}</p>
-                    </div>
-                    <div className="text-center w-1/2 sm:w-56">
-                      <p className="text-[10px] md:text-xs font-bold mb-2 uppercase text-gray-500">Supervisor</p>
-                      <div className="h-20 w-20 md:h-32 md:w-32 mx-auto border p-1 bg-white rounded shadow-sm flex items-center justify-center">
-                        {qrSupervisor ? <img src={qrSupervisor} alt="QR" className="w-full h-full mix-blend-multiply" crossOrigin="anonymous" /> : <div className="text-[8px] md:text-[10px] text-red-400 font-bold uppercase text-center">Pending<br/>Verif</div>}
-                      </div>
-                      <p className="font-black text-gray-900 uppercase text-[10px] md:text-sm mt-2 border-t pt-1 break-words">{pm.status === 'Terverifikasi' ? pm.verifiedBy : '...................'}</p>
-                    </div>
-                  </div>
-                </div>
-              );
-            }) : (
-              <div className="text-center p-16 border-4 border-dashed text-gray-500 rounded-xl">Arsip Dokumen PM Kosong</div>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'sparepart' && (
-          <div className="bg-white p-4 md:p-8 rounded-xl print:p-0 border print:border-0 shadow-sm print:shadow-none">
-            <div className="flex items-center justify-between border-b-4 border-gray-900 pb-6 mb-8 print:flex hidden">
-              <div>
-                <h1 className="text-2xl md:text-3xl font-black uppercase text-gray-900">Mutasi Sparepart</h1>
-                <p className="text-xs md:text-sm font-bold text-gray-500 uppercase tracking-widest mt-1">Gudang - {filterFactory}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-[10px] md:text-xs font-bold text-gray-400">PERIODE</p>
-                <p className="text-base md:text-lg font-black text-gray-900">{filterMonth || filterYear || 'Semua Waktu'}</p>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto w-full">
-              <table className="w-full border-collapse border border-gray-900 text-xs md:text-sm min-w-[500px]">
-                <thead>
-                  <tr className="bg-gray-900 text-white">
-                    <th className="border border-gray-900 p-2 md:p-3 w-24">Tanggal</th>
-                    <th className="border border-gray-900 p-2 md:p-3">Item Part</th>
-                    <th className="border border-gray-900 p-2 md:p-3 text-center w-16">Tipe</th>
-                    <th className="border border-gray-900 p-2 md:p-3 text-center w-16">Qty</th>
-                    <th className="border border-gray-900 p-2 md:p-3 text-left">Keterangan</th>
-                    <th className="border border-gray-900 p-2 md:p-3 w-24">User</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredSparepartLogs.length > 0 ? filteredSparepartLogs.slice().reverse().map(log => (
-                    <tr key={log.id} className="hover:bg-gray-50">
-                      <td className="border border-gray-900 p-2 text-center text-[10px] md:text-xs font-medium">{log.date}</td>
-                      <td className="border border-gray-900 p-2">
-                        <span className="font-bold text-gray-900 block">{log.partName}</span>
-                        <span className="text-[9px] md:text-[10px] text-gray-500 block">{log.partCode}</span>
-                      </td>
-                      <td className="border border-gray-900 p-2 text-center">
-                         <span className={`px-1.5 py-0.5 md:px-2 md:py-1 rounded font-black text-[8px] md:text-[10px] uppercase ${log.type === 'IN' ? 'bg-green-100 text-green-800 border border-green-300' : 'bg-red-100 text-red-800 border border-red-300'}`}>
-                           {log.type}
-                         </span>
-                      </td>
-                      <td className={`border border-gray-900 p-2 text-center font-black ${log.type === 'IN' ? 'text-green-700' : 'text-red-700'}`}>
-                         {log.type === 'IN' ? '+' : '-'}{log.qty} <span className="text-[9px] md:text-[10px] font-normal text-black">{log.unit}</span>
-                      </td>
-                      <td className="border border-gray-900 p-2 text-[10px] md:text-xs italic">{log.remarks}</td>
-                      <td className="border border-gray-900 p-2 text-center text-[10px] md:text-xs font-bold">{log.user}</td>
-                    </tr>
-                  )) : (
-                    <tr><td colSpan="6" className="border border-gray-900 p-10 text-center font-bold text-gray-400">Data Transaksi Kosong</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="hidden print:flex justify-between mt-12 pt-4">
-              <div className="text-center w-40 md:w-48">
-                <p className="text-[10px] font-bold uppercase text-gray-500 mb-16">PIC Gudang/Admin</p>
-                <p className="border-t border-gray-900 pt-1 font-bold text-xs md:text-sm">____________________</p>
-              </div>
-              <div className="text-center w-40 md:w-48">
-                <p className="text-[10px] font-bold uppercase text-gray-500 mb-16">Menyetujui (Manager)</p>
-                <p className="border-t border-gray-900 pt-1 font-bold text-xs md:text-sm">____________________</p>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const InfoKPI = () => (
-    <div className="space-y-6">
-       <h2 className="text-2xl font-bold text-gray-800 border-b-2 pb-2"><i className="fa-solid fa-book-open text-blue-600 mr-2"></i> Panduan Penghitungan KPI</h2>
-       <div className="bg-white p-6 md:p-8 rounded-xl shadow-sm border space-y-8">
-          
-          <div>
-             <h3 className="text-lg font-black text-green-700 flex items-center mb-2"><i className="fa-solid fa-stopwatch mr-2"></i> 1. MTBF (Mean Time Between Failures)</h3>
-             <p className="text-gray-700 text-sm mb-2">Mengukur rata-rata keandalan sebuah mesin. Semakin tinggi angkanya, semakin jarang mesin tersebut rusak.</p>
-             <div className="bg-gray-50 p-4 border rounded">
-                <p className="font-bold text-xs uppercase mb-1">Rumus:</p>
-                <code className="text-sm bg-gray-200 px-2 py-1 rounded block mb-3 font-mono">Total Jam Operasi Mesin / Jumlah Kerusakan</code>
-                <p className="font-bold text-xs uppercase mb-1 mt-2">Logika Sistem:</p>
-                <ul className="list-disc pl-5 text-sm text-gray-600">
-                   <li>Sistem berasumsi jam operasional mesin adalah <strong>40 Jam/Minggu</strong>.</li>
-                   <li>Maka per 1 Bulan = 160 Jam, per 1 Tahun = 2080 Jam.</li>
-                   <li>Contoh Bulan ini ada 10 mesin. Total jam operasi = 1600 Jam. Jika terjadi 4 kerusakan, MTBF = 1600 / 4 = 400 Jam.</li>
-                   <li><strong>% Reliability:</strong> Dihitung dari <code>((Total Jam Operasi - Total Jam Perbaikan) / Total Jam Operasi) * 100</code>.</li>
-                </ul>
-             </div>
-          </div>
-
-          <div>
-             <h3 className="text-lg font-black text-yellow-600 flex items-center mb-2"><i className="fa-solid fa-tools mr-2"></i> 2. MTTR (Mean Time To Repair)</h3>
-             <p className="text-gray-700 text-sm mb-2">Mengukur kecepatan teknisi dalam menangani mesin rusak. Semakin kecil angkanya, semakin efisien tim teknisi Anda.</p>
-             <div className="bg-gray-50 p-4 border rounded">
-                <p className="font-bold text-xs uppercase mb-1">Rumus:</p>
-                <code className="text-sm bg-gray-200 px-2 py-1 rounded block mb-3 font-mono">Total Waktu Perbaikan / Total Kerusakan Selesai</code>
-                <p className="font-bold text-xs uppercase mb-1 mt-2">Logika Sistem:</p>
-                <ul className="list-disc pl-5 text-sm text-gray-600">
-                   <li>Diambil berdasarkan selisih <strong>Jam Mulai Perbaikan</strong> dan <strong>Jam Selesai Perbaikan</strong> yang diinput teknisi saat menyelesaian Tiket Breakdown.</li>
-                </ul>
-             </div>
-          </div>
-
-          <div>
-             <h3 className="text-lg font-black text-blue-600 flex items-center mb-2"><i className="fa-solid fa-calendar-check mr-2"></i> 3. PM Completion (Penyelesaian Perawatan)</h3>
-             <p className="text-gray-700 text-sm mb-2">Mengukur tingkat kepatuhan (Compliance) tim terhadap jadwal perawatan mesin.</p>
-             <div className="bg-gray-50 p-4 border rounded">
-                <p className="font-bold text-xs uppercase mb-1">Rumus:</p>
-                <code className="text-sm bg-gray-200 px-2 py-1 rounded block mb-3 font-mono">(Jumlah PM Selesai / Total Jadwal PM Bulan Ini) * 100%</code>
-             </div>
-          </div>
-
-          <div>
-             <h3 className="text-lg font-black text-orange-600 flex items-center mb-2"><i className="fa-solid fa-clipboard-list mr-2"></i> 4. Backlog Work Order</h3>
-             <p className="text-gray-700 text-sm mb-2">Menunjukkan "Tunggakan Pekerjaan". Jika Backlog tinggi, artinya teknisi kekurangan waktu atau Sparepart sedang kosong.</p>
-             <div className="bg-gray-50 p-4 border rounded">
-                <ul className="list-disc pl-5 text-sm text-gray-600">
-                   <li>Sistem menghitung total tiket breakdown yang berstatus <strong>"Open"</strong> (Belum selesai diperbaiki) di periode terpilih.</li>
-                </ul>
-             </div>
-          </div>
-
-          <div>
-             <h3 className="text-lg font-black text-red-600 flex items-center mb-2"><i className="fa-solid fa-truck-medical mr-2"></i> 5. LTI (Lost Time Incident)</h3>
-             <p className="text-gray-700 text-sm mb-2">Indikator Keselamatan/Safety pabrik. Jumlah kecelakaan kerja yang menyebabkan hilangnya waktu kerja efektif.</p>
-             <div className="bg-gray-50 p-4 border rounded">
-                <ul className="list-disc pl-5 text-sm text-gray-600">
-                   <li>Karena datanya berada di luar lingkup mesin, LTI harus <strong>diinput secara manual</strong> oleh Admin di halaman KPI Dashboard dengan mengklik tombol "+ Catat LTI".</li>
-                   <li>Target mutlak untuk semua pabrik adalah <strong>0 (Nol) Kejadian</strong>.</li>
-                </ul>
-             </div>
-          </div>
-
-       </div>
-    </div>
-  );
-
   const NavItem = ({ id, icon, label, roles }) => {
     if (!roles.includes(currentUser.role)) return null;
     return (
@@ -2458,7 +1564,12 @@ export default function App() {
                 <div className="absolute right-0 mt-2 w-72 md:w-80 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 overflow-hidden transform origin-top-right transition-all">
                    <div className="bg-gray-900 text-white p-3 font-bold flex justify-between items-center">
                       <span>Notifikasi Sistem</span>
-                      <span className="text-[10px] bg-gray-700 px-2 py-1 rounded-full">{notifications.length} Baru</span>
+                      <div className="flex gap-2">
+                         {notifications.length > 0 && (
+                            <button onClick={markAllNotifsAsRead} className="text-[9px] bg-blue-600 hover:bg-blue-500 px-2 py-1 rounded text-white transition-colors">Tandai Dibaca</button>
+                         )}
+                         <span className="text-[10px] bg-gray-700 px-2 py-1 rounded-full">{notifications.length} Baru</span>
+                      </div>
                    </div>
                    <div className="max-h-80 overflow-y-auto">
                       {notifications.length > 0 ? notifications.map((n, idx) => (
@@ -2470,7 +1581,10 @@ export default function App() {
                                <p className="text-xs font-bold text-gray-900">{n.title}</p>
                                <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{n.text}</p>
                             </div>
-                            <button onClick={(e) => { e.stopPropagation(); setDismissedNotifs([...dismissedNotifs, n.id]); }} className="absolute right-3 top-3 text-gray-400 hover:text-red-500" title="Tutup">
+                            <button onClick={(e) => { 
+                               e.stopPropagation(); 
+                               setDismissedNotifs(prev => [...prev, n.id]); 
+                            }} className="absolute right-3 top-3 text-gray-400 hover:text-red-500 p-1" title="Tutup Notif ini">
                                <i className="fa-solid fa-xmark"></i>
                             </button>
                          </div>
