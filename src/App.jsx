@@ -32,6 +32,7 @@ export default function App() {
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [showScanner, setShowScanner] = useState(false);
+  const [chatTicket, setChatTicket] = useState(null); // State untuk Fitur Diskusi
 
   // --- STATES: DATABASE ---
   const [factories, setFactories] = useState([]);
@@ -139,8 +140,15 @@ export default function App() {
          notifs.push({ id: b.id, title: 'Mesin Selesai', text: `Perbaikan mesin telah selesai.`, type: 'success', action: 'req_perbaikan' })
       );
     }
+    
+    // Fitur Low Stock Alert
+    if (['admin', 'teknisi'].includes(currentUser.role)) {
+      spareparts.filter(sp => sp.stock < 5).forEach(sp => 
+         notifs.push({ id: `stock_${sp.id}`, title: 'Stok Menipis', text: `${sp.name} sisa ${sp.stock} ${sp.unit}`, type: 'warning', action: 'kelola_sparepart' })
+      );
+    }
     setNotifications(notifs.slice(0, 8));
-  }, [breakdowns, sparepartRequests, pmSchedules, currentUser, machines]);
+  }, [breakdowns, sparepartRequests, pmSchedules, currentUser, machines, spareparts]);
 
 
   // --- HELPER FUNCTIONS ---
@@ -179,6 +187,21 @@ export default function App() {
   };
 
   const handleLogout = () => setCurrentUser(null);
+
+  // --- FITUR BARU: EXPORT CSV ---
+  const exportToCSV = (data, filename) => {
+    if (!data || !data.length) {
+       showMessage('Kosong', 'Tidak ada data untuk diekspor.', 'warning');
+       return;
+    }
+    const headers = Object.keys(data[0]).join(',');
+    const csv = [headers, ...data.map(row => Object.values(row).map(val => `"${String(val || '').replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+  };
 
   // --- KOMPONEN UI UTAMA ---
   const ModalDialog = () => {
@@ -231,7 +254,6 @@ export default function App() {
     );
   };
 
-  // Komponen Real Camera Scanner
   const CameraQRScanner = ({ onScanSuccess, onClose }) => {
     useEffect(() => {
       let scanner = null;
@@ -250,9 +272,7 @@ export default function App() {
         } catch (err) { console.log(err); }
       };
       
-      // Delay sedikit memastikan div "reader" sudah mount
       setTimeout(initScanner, 300);
-
       return () => { if(scanner) { scanner.clear().catch(e => console.log(e)); } };
     }, []);
 
@@ -265,6 +285,55 @@ export default function App() {
              <div id="reader" className="w-full min-h-[300px] overflow-hidden rounded-lg border-2 border-dashed border-gray-300"></div>
              <p className="text-xs text-center text-gray-500 mt-4 italic">* Pastikan Anda memberikan izin (Allow) pada browser untuk mengakses kamera.</p>
           </div>
+        </div>
+      </div>
+    );
+  };
+
+  // --- KOMPONEN DISKUSI TIKET ---
+  const TicketChatModal = () => {
+    if (!chatTicket) return null;
+    const [msg, setMsg] = useState('');
+    const ticket = breakdowns.find(b => b.id === chatTicket.id) || chatTicket;
+    const comments = ticket.comments || [];
+
+    const handleSend = async (e) => {
+      e.preventDefault();
+      if (!msg.trim()) return;
+      const newComment = { sender: currentUser.name, role: currentUser.role, text: msg, time: new Date().toLocaleString() };
+      await updateDoc(docRef('cmms_breakdowns', ticket.id), { comments: [...comments, newComment] });
+      setMsg('');
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-75 z-[100] flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col h-[500px]">
+          <div className="bg-gray-900 text-white p-4 rounded-t-xl flex justify-between items-center shrink-0">
+            <div>
+              <h3 className="font-bold"><i className="fa-regular fa-comments mr-2"></i> Diskusi Laporan</h3>
+              <p className="text-xs text-gray-400">{machines.find(m => m.id === ticket.machineId)?.name}</p>
+            </div>
+            <button onClick={() => setChatTicket(null)} className="text-gray-400 hover:text-white"><i className="fa-solid fa-xmark text-xl"></i></button>
+          </div>
+          <div className="flex-1 p-4 overflow-y-auto bg-gray-50 space-y-4">
+            <div className="bg-blue-100 p-3 rounded-lg text-sm text-blue-900 border border-blue-200">
+               <strong>Keluhan Masuk:</strong> {ticket.description}
+            </div>
+            {comments.map((c, i) => (
+              <div key={i} className={`flex flex-col ${c.sender === currentUser.name ? 'items-end' : 'items-start'}`}>
+                <span className="text-[10px] text-gray-500 mb-1">{c.sender} ({c.role})</span>
+                <div className={`p-2.5 rounded-lg text-sm max-w-[85%] shadow-sm ${c.sender === currentUser.name ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white border rounded-tl-none text-gray-800'}`}>
+                  {c.text}
+                </div>
+                <span className="text-[9px] text-gray-400 mt-1">{c.time}</span>
+              </div>
+            ))}
+            {comments.length === 0 && <p className="text-center text-gray-400 text-xs mt-10 italic">Belum ada diskusi, silakan tinggalkan pesan.</p>}
+          </div>
+          <form onSubmit={handleSend} className="p-3 border-t bg-white flex gap-2 rounded-b-xl shrink-0">
+            <input type="text" className="flex-1 border-2 border-gray-200 p-2 rounded-lg text-sm outline-none focus:border-blue-500" placeholder="Ketik pesan balasan..." value={msg} onChange={e => setMsg(e.target.value)} />
+            <button type="submit" className="bg-blue-600 text-white px-5 py-2 rounded-lg font-bold hover:bg-blue-700 transition-colors"><i className="fa-solid fa-paper-plane"></i></button>
+          </form>
         </div>
       </div>
     );
@@ -308,7 +377,7 @@ export default function App() {
 
   // --- KOMPONEN MENU UTAMA ---
   const Dashboard = () => {
-    const [viewMode, setViewMode] = useState('overview'); // overview, monthly, yearly
+    const [viewMode, setViewMode] = useState('overview'); 
     const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
 
@@ -317,7 +386,6 @@ export default function App() {
     const resolvedBreakdowns = breakdowns.filter(b => b.status === 'Selesai Diperbaiki' && availableMachines.find(m => m.id === b.machineId));
     const pendingPMs = pmSchedules.filter(s => s.status === 'Pending' && availableMachines.find(m => m.id === s.machineId));
     
-    // --- Kalkulasi KPI dengan Asumsi 40 Jam Kerja per Minggu ---
     const filterByDate = (dateString, periodStr, isYearly) => {
       if(!dateString) return false;
       if (isYearly) return dateString.includes(periodStr);
@@ -359,7 +427,6 @@ export default function App() {
     });
     const kpiMTTR = resolvedCount > 0 ? (totalRepairHours / resolvedCount).toFixed(1) : 0;
 
-    // MTBF dengan Asumsi 40 Jam Kerja per Minggu (160 jam/bulan, 2080 jam/tahun)
     const workingHoursPerPeriod = isYearly ? 2080 : 160; 
     const totalMachineHours = availableMachines.length * workingHoursPerPeriod;
     const totalFailures = periodBreakdowns.length;
@@ -372,7 +439,6 @@ export default function App() {
     const kpiPM = totalScheduledPM > 0 ? Math.round((completedPM / totalScheduledPM) * 100) : 100;
     const kpiBacklog = periodBreakdowns.filter(b => b.status === 'Open').length;
 
-    // Overview Chart
     const machineErrorCounts = {};
     breakdowns.filter(b => availableMachines.find(m => m.id === b.machineId)).forEach(b => {
        const mName = machines.find(m => m.id === b.machineId)?.name || 'Unknown';
@@ -845,7 +911,7 @@ export default function App() {
           @media print { body { background: white; align-items: flex-start; justify-content: flex-start; padding: 20px;} .label-card { border: 1px solid #000; box-shadow: none; } }
         </style></head><body>
           <div class="label-card"><h2>${machine.name}</h2><p class="code">${machine.code}</p>
-          <img src="${qrUrl}" alt="QR" onload="window.print(); window.close();" /><p class="loc">LOKASI: ${machine.factory}</p></div>
+          <img src="${qrUrl}" alt="QR" onload="window.print(); window.close();" /><p class="loc">AREA: ${machine.location || '-'} | PABRIK: ${machine.factory}</p></div>
         </body></html>
       `);
       printWindow.document.close();
@@ -876,8 +942,15 @@ export default function App() {
               </div>
               <div className="flex flex-col sm:flex-row gap-3">
                 <div className="flex-1">
-                  <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Lokasi Detail</label>
-                  <input type="text" required className="w-full border p-2 rounded" value={newMachine.location} onChange={e => setNewMachine({...newMachine, location: e.target.value})} />
+                  <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Lokasi Detail (Area)</label>
+                  <input list="area-options" type="text" placeholder="Mixing, Filling..." required className="w-full border p-2 rounded" value={newMachine.location} onChange={e => setNewMachine({...newMachine, location: e.target.value})} />
+                  <datalist id="area-options">
+                    <option value="Mixing" />
+                    <option value="Filling" />
+                    <option value="Packing" />
+                    <option value="Utility" />
+                    <option value="QC" />
+                  </datalist>
                 </div>
                 <div className="sm:w-1/3">
                   <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Pabrik Utama</label>
@@ -908,7 +981,10 @@ export default function App() {
                       <div className="bg-blue-50 text-blue-600 p-2 rounded-lg mr-3 mt-1"><i className="fa-solid fa-box-open"></i></div>
                       <div>
                         <p className="font-bold text-gray-800">{m.name} <span className="text-xs text-gray-500 font-normal">({m.code})</span></p>
-                        <div className="text-[10px] mt-1"><span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded uppercase font-bold">{m.factory}</span></div>
+                        <div className="text-[10px] mt-1">
+                          <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded uppercase font-bold mr-1">{m.factory}</span>
+                          <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded uppercase font-bold">{m.location || 'Area Lainnya'}</span>
+                        </div>
                       </div>
                     </div>
                     <div className="flex gap-2 w-full sm:w-auto">
@@ -1045,7 +1121,6 @@ export default function App() {
             <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm lg:col-span-2 overflow-hidden flex flex-col">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
                  <h3 className="font-semibold text-lg text-gray-800">Daftar Stok</h3>
-                 {/* Fungsi Pencarian Sparepart by Nama */}
                  <div className="relative w-full sm:w-auto">
                     <i className="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-gray-400"></i>
                     <input type="text" placeholder="Cari nama part..." className="border p-2 pl-9 rounded-lg text-sm w-full sm:w-64 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none" value={searchPart} onChange={e => setSearchPart(e.target.value)} />
@@ -1376,6 +1451,14 @@ export default function App() {
                       <span className={`text-[10px] px-2 py-1 rounded-full font-bold uppercase ${b.status === 'Open' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{b.status}</span>
                     </div>
                     <div className="bg-white p-3 rounded border text-sm text-gray-700 mb-2 italic">"{b.description}"</div>
+                    
+                    {/* Tombol Chat di sisi User/Pelapor */}
+                    {b.status === 'Open' && (
+                       <button onClick={() => setChatTicket(b)} className="mb-3 text-xs text-blue-600 font-bold hover:underline bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 flex items-center">
+                         <i className="fa-regular fa-comments mr-1.5"></i> Balas/Lihat Pesan Teknisi {(b.comments?.length > 0) ? `(${b.comments.length})` : ''}
+                       </button>
+                    )}
+                    
                     {b.status === 'Selesai Diperbaiki' && <div className="text-xs text-green-800 font-medium mb-2"><i className="fa-solid fa-check mr-1"></i> Telah diperbaiki oleh: {b.resolvedBy}</div>}
                     <div className="text-[10px] text-gray-500 font-medium">{b.date}</div>
                   </div>
@@ -1431,6 +1514,12 @@ export default function App() {
                       <span className="absolute -top-2 left-3 bg-gray-50 text-[10px] font-bold text-gray-400 px-1">Lapor: {b.requestBy}</span>
                       <p className="text-sm text-gray-800 mt-1">{b.description}</p>
                     </div>
+                    
+                    {/* Tombol Diskusi di sisi Teknisi */}
+                    <button onClick={() => setChatTicket(b)} className="mb-3 w-full border border-gray-300 bg-gray-50 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 text-gray-700 font-bold px-4 py-2 rounded-lg text-sm transition-colors flex justify-center items-center">
+                       <i className="fa-regular fa-comments mr-2"></i> Diskusi Tiket {(b.comments?.length > 0) && <span className="ml-2 bg-blue-500 text-white text-[10px] px-2 py-0.5 rounded-full">{b.comments.length}</span>}
+                    </button>
+                    
                     {!isResolving ? (
                       <button onClick={() => {setResolveId(b.id); setResolveData({ analysis: '', partsReplaced: '', startDate: new Date().toISOString().split('T')[0], startTime: '', endTime: '' })}} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-3 rounded-lg transition-colors"><i className="fa-solid fa-hand-pointer mr-2"></i> Ambil Pekerjaan Ini</button>
                     ) : (
@@ -1538,12 +1627,27 @@ export default function App() {
   const CekHarian = () => {
     const [selectedMachine, setSelectedMachine] = useState(null);
     const [checkData, setCheckData] = useState({});
+    const [showScanner, setShowScanner] = useState(false);
     const availableMachines = getAvailableMachines();
     const params = selectedMachine ? dailyParams.filter(p => p.machineId === selectedMachine) : [];
 
+    // --- CEK DATA HARI INI ---
+    const todayStr = new Date().toISOString().split('T')[0];
+    const checkedTodayIds = new Set(dailyChecks.filter(c => c.date === todayStr).map(c => c.machineId));
+
+    // --- GROUPING MESIN PER AREA ---
+    const groupedMachines = availableMachines.reduce((acc, m) => {
+       const area = m.location || 'Area Lainnya';
+       if (!acc[area]) acc[area] = [];
+       acc[area].push(m);
+       return acc;
+    }, {});
+    
+    const sortedAreas = Object.keys(groupedMachines).sort();
+
     const handleSaveCheck = async (e) => {
       e.preventDefault();
-      await addDoc(colRef('cmms_dailyChecks'), { date: new Date().toISOString().split('T')[0], machineId: selectedMachine, teknisi: currentUser.name, results: checkData });
+      await addDoc(colRef('cmms_dailyChecks'), { date: todayStr, machineId: selectedMachine, teknisi: currentUser.name, results: checkData });
       showMessage('Selesai', 'Data checklist harian disubmit ke Database.', 'success');
       setSelectedMachine(null);
       setCheckData({});
@@ -1552,6 +1656,11 @@ export default function App() {
     const handleQRSuccess = (code) => {
        const m = availableMachines.find(x => x.code === code);
        if (m) {
+          if (checkedTodayIds.has(m.id)) {
+             showMessage('Sudah Dicek', `Mesin ${m.name} sudah diperiksa hari ini. Tidak bisa diinput ganda.`, 'warning');
+             setShowScanner(false);
+             return;
+          }
           setSelectedMachine(m.id);
           setCheckData({});
           setShowScanner(false);
@@ -1573,16 +1682,54 @@ export default function App() {
         </div>
 
         <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-100">
-          <h3 className="text-xs font-bold text-gray-500 uppercase mb-4 border-b pb-2">Atau Pilih Mesin Manual</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 md:gap-4">
-            {availableMachines.map(m => (
-              <div key={m.id} onClick={() => { setSelectedMachine(m.id); setCheckData({}); }} className={`cursor-pointer border-2 p-4 rounded-xl flex flex-col items-center text-center transition-all ${selectedMachine === m.id ? 'bg-blue-600 border-blue-600 shadow-lg scale-105' : 'bg-white hover:border-blue-300'}`}>
-                <div className={`text-2xl md:text-3xl mb-2 ${selectedMachine === m.id ? 'text-white' : 'text-gray-400'}`}><i className="fa-solid fa-box"></i></div>
-                <span className={`text-[10px] md:text-xs font-bold ${selectedMachine === m.id ? 'text-white' : 'text-gray-800'}`}>{m.name}</span>
+          <h3 className="text-xs font-bold text-gray-500 uppercase mb-4 border-b pb-2">Atau Pilih Mesin Manual (Per Area)</h3>
+          
+          {sortedAreas.map(area => (
+            <div key={area} className="mb-6">
+              <h4 className="font-bold text-blue-800 bg-blue-50 px-3 py-1.5 rounded inline-block mb-3 uppercase text-xs border border-blue-100 shadow-sm"><i className="fa-solid fa-layer-group mr-2"></i> Area: {area}</h4>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 md:gap-4">
+                {groupedMachines[area].map(m => {
+                  const isChecked = checkedTodayIds.has(m.id);
+                  const isSelected = selectedMachine === m.id;
+                  
+                  let cardStyle = "bg-white hover:border-blue-300 cursor-pointer";
+                  let iconColor = "text-gray-400";
+                  let textColor = "text-gray-800";
+                  
+                  if (isChecked) {
+                     cardStyle = "bg-green-50 border-green-300 cursor-not-allowed opacity-80";
+                     iconColor = "text-green-500";
+                     textColor = "text-green-900";
+                  } else if (isSelected) {
+                     cardStyle = "bg-blue-600 border-blue-600 shadow-lg scale-105 cursor-pointer";
+                     iconColor = "text-white";
+                     textColor = "text-white";
+                  }
+
+                  return (
+                    <div key={m.id} onClick={() => { 
+                         if (isChecked) {
+                            showMessage('Selesai', `Mesin ${m.name} sudah diperiksa hari ini. Tidak perlu diisi ulang.`, 'warning');
+                            return;
+                         }
+                         setSelectedMachine(m.id); 
+                         setCheckData({}); 
+                      }} 
+                      className={`border-2 p-4 rounded-xl flex flex-col items-center text-center transition-all ${cardStyle}`}>
+                      <div className={`text-2xl md:text-3xl mb-2 ${iconColor}`}>
+                         {isChecked ? <i className="fa-solid fa-check-circle"></i> : <i className="fa-solid fa-box"></i>}
+                      </div>
+                      <span className={`text-[10px] md:text-xs font-bold ${textColor}`}>{m.name}</span>
+                      {isChecked && <span className="text-[8px] mt-1.5 bg-green-200 text-green-900 border border-green-400 px-1.5 py-0.5 rounded font-black uppercase tracking-wider shadow-sm">Sudah Dicek</span>}
+                    </div>
+                  )
+                })}
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
+          {sortedAreas.length === 0 && <p className="text-gray-400 italic text-sm text-center py-4">Belum ada mesin di pabrik ini.</p>}
         </div>
+
         {selectedMachine && (
           <div className="bg-white p-4 md:p-6 rounded-xl shadow-xl border-t-8 border-blue-500 animate-[fadeIn_0.3s]">
             <h3 className="text-lg md:text-xl font-bold mb-6 flex items-center border-b pb-4"><i className="fa-solid fa-list-check text-blue-500 mr-3"></i> Checklist: {machines.find(m=>m.id === selectedMachine)?.name}</h3>
@@ -1819,7 +1966,14 @@ export default function App() {
               </div>
             ) : null}
             
-            <button onClick={() => window.print()} className="col-span-full md:col-span-1 md:ml-auto bg-gray-900 text-white px-4 py-2 rounded-lg font-bold shadow-lg w-full"><i className="fa-solid fa-print mr-2"></i> Cetak Dokumen</button>
+            <div className="col-span-full md:col-span-1 md:ml-auto flex flex-col md:flex-row gap-2 w-full">
+               <button onClick={() => window.print()} className="bg-gray-900 hover:bg-black text-white px-4 py-2 rounded-lg font-bold shadow-sm w-full transition-colors flex justify-center items-center"><i className="fa-solid fa-print mr-2"></i> Cetak PDF</button>
+               <button onClick={() => {
+                  if(activeTab === 'harian') exportToCSV(filteredChecks.map(c => ({Tanggal: c.date, Mesin_ID: c.machineId, Nama_Teknisi: c.teknisi, Data_Aktual: JSON.stringify(c.results)})), 'Export_Logsheet_Harian.csv');
+                  if(activeTab === 'pm') exportToCSV(filteredPMs.map(p => ({Tanggal_Tugas: p.date, Judul_Tugas: p.title, Mesin_ID: p.machineId, Dikerjakan_Oleh: p.executedBy, Diverifikasi_Oleh: p.verifiedBy, Status: p.status})), 'Export_Laporan_PM.csv');
+                  if(activeTab === 'sparepart') exportToCSV(filteredSparepartLogs.map(l => ({Tanggal: l.date, Kode_Item: l.partCode, Nama_Part: l.partName, Tipe_Trx: l.type, Jumlah: l.qty, Satuan: l.unit, PIC: l.user, Catatan: l.remarks})), 'Export_Mutasi_Sparepart.csv');
+               }} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-bold shadow-sm w-full transition-colors flex justify-center items-center"><i className="fa-solid fa-file-excel mr-2"></i> Export ke CSV</button>
+            </div>
           </div>
         </div>
 
@@ -2129,6 +2283,7 @@ export default function App() {
     <div className="min-h-screen bg-gray-50 flex text-gray-900 font-sans">
       <ModalDialog />
       <ProfileEditModal />
+      <TicketChatModal />
       
       {isSidebarOpen && <div className="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden print:hidden" onClick={() => setIsSidebarOpen(false)}></div>}
       
