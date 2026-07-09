@@ -27,9 +27,11 @@ export default function App() {
   const [activeMenu, setActiveMenu] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [dialog, setDialog] = useState(null);
+  const [profileDialog, setProfileDialog] = useState(false);
   
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  const [showScanner, setShowScanner] = useState(false);
 
   // --- STATES: DATABASE ---
   const [factories, setFactories] = useState([]);
@@ -44,14 +46,27 @@ export default function App() {
   const [spareparts, setSpareparts] = useState([]);
   const [sparepartLogs, setSparepartLogs] = useState([]);
   const [sparepartRequests, setSparepartRequests] = useState([]);
-  const [ltiLogs, setLtiLogs] = useState([]); // State Baru untuk LTI
+  const [ltiLogs, setLtiLogs] = useState([]);
 
-  // --- EFFECT: LOAD FONTAWESOME & FIREBASE AUTH ---
+  // --- EFFECT: LOAD SCRIPT & FIREBASE AUTH ---
   useEffect(() => {
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';
-    document.head.appendChild(link);
+    // Load FontAwesome
+    if(!document.getElementById('fa-script')){
+      const link = document.createElement('link');
+      link.id = 'fa-script';
+      link.rel = 'stylesheet';
+      link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';
+      document.head.appendChild(link);
+    }
+    
+    // Load HTML5 QRCode Scanner untuk Kamera
+    if(!document.getElementById('qr-script')){
+      const qrScript = document.createElement('script');
+      qrScript.id = 'qr-script';
+      qrScript.src = 'https://unpkg.com/html5-qrcode';
+      qrScript.async = true;
+      document.body.appendChild(qrScript);
+    }
 
     const initAuth = async () => {
       try {
@@ -77,28 +92,26 @@ export default function App() {
     const handleSnap = (setter) => (snap) => setter(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     const handleErr = (err) => console.error("DB Sync Error:", err);
 
-    const unsubFactories = onSnapshot(getPath('cmms_factories'), handleSnap(setFactories), handleErr);
-    const unsubUsers = onSnapshot(getPath('cmms_users'), (snap) => {
-      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setIsDbLoaded(true);
-    }, handleErr);
-    const unsubMachines = onSnapshot(getPath('cmms_machines'), handleSnap(setMachines), handleErr);
-    const unsubDailyParams = onSnapshot(getPath('cmms_dailyParams'), handleSnap(setDailyParams), handleErr);
-    const unsubDailyChecks = onSnapshot(getPath('cmms_dailyChecks'), handleSnap(setDailyChecks), handleErr);
-    const unsubBreakdowns = onSnapshot(getPath('cmms_breakdowns'), handleSnap(setBreakdowns), handleErr);
-    const unsubPmSchedules = onSnapshot(getPath('cmms_pmSchedules'), handleSnap(setPmSchedules), handleErr);
-    const unsubPmParams = onSnapshot(getPath('cmms_pmParams'), handleSnap(setPmParams), handleErr);
-    const unsubDailyActivities = onSnapshot(getPath('cmms_dailyActivities'), handleSnap(setDailyActivities), handleErr);
-    const unsubSpareparts = onSnapshot(getPath('cmms_spareparts'), handleSnap(setSpareparts), handleErr);
-    const unsubSparepartLogs = onSnapshot(getPath('cmms_sparepart_logs'), handleSnap(setSparepartLogs), handleErr);
-    const unsubSparepartRequests = onSnapshot(getPath('cmms_sparepart_requests'), handleSnap(setSparepartRequests), handleErr);
-    const unsubLtiLogs = onSnapshot(getPath('cmms_lti_logs'), handleSnap(setLtiLogs), handleErr); // Sync LTI
+    const unsubscribes = [
+      onSnapshot(getPath('cmms_factories'), handleSnap(setFactories), handleErr),
+      onSnapshot(getPath('cmms_users'), (snap) => {
+        setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setIsDbLoaded(true);
+      }, handleErr),
+      onSnapshot(getPath('cmms_machines'), handleSnap(setMachines), handleErr),
+      onSnapshot(getPath('cmms_dailyParams'), handleSnap(setDailyParams), handleErr),
+      onSnapshot(getPath('cmms_dailyChecks'), handleSnap(setDailyChecks), handleErr),
+      onSnapshot(getPath('cmms_breakdowns'), handleSnap(setBreakdowns), handleErr),
+      onSnapshot(getPath('cmms_pmSchedules'), handleSnap(setPmSchedules), handleErr),
+      onSnapshot(getPath('cmms_pmParams'), handleSnap(setPmParams), handleErr),
+      onSnapshot(getPath('cmms_dailyActivities'), handleSnap(setDailyActivities), handleErr),
+      onSnapshot(getPath('cmms_spareparts'), handleSnap(setSpareparts), handleErr),
+      onSnapshot(getPath('cmms_sparepart_logs'), handleSnap(setSparepartLogs), handleErr),
+      onSnapshot(getPath('cmms_sparepart_requests'), handleSnap(setSparepartRequests), handleErr),
+      onSnapshot(getPath('cmms_lti_logs'), handleSnap(setLtiLogs), handleErr)
+    ];
 
-    return () => {
-      unsubFactories(); unsubUsers(); unsubMachines(); unsubDailyParams();
-      unsubDailyChecks(); unsubBreakdowns(); unsubPmSchedules(); unsubPmParams(); unsubDailyActivities();
-      unsubSpareparts(); unsubSparepartLogs(); unsubSparepartRequests(); unsubLtiLogs();
-    };
+    return () => unsubscribes.forEach(unsub => unsub());
   }, [fbUser]);
 
   // --- EFFECT: GENERATOR NOTIFIKASI ---
@@ -109,27 +122,22 @@ export default function App() {
 
     if (['admin', 'teknisi'].includes(currentUser.role)) {
       const openBrk = breakdowns.filter(b => b.status === 'Open' && availableMachines.find(m => m.id === b.machineId));
-      openBrk.forEach(b => {
-         notifs.push({ id: b.id, title: 'Breakdown Baru', text: b.description, type: 'alert', action: currentUser.role === 'admin' ? 'dashboard' : 'penanganan_rusak' });
-      });
+      openBrk.forEach(b => notifs.push({ id: b.id, title: 'Breakdown Baru', text: b.description, type: 'alert', action: currentUser.role === 'admin' ? 'dashboard' : 'penanganan_rusak' }));
     }
     if (currentUser.role === 'admin') {
-      const reqParts = sparepartRequests.filter(r => r.status === 'Pending');
-      reqParts.forEach(r => {
-         notifs.push({ id: r.id, title: 'Request Part', text: `${r.requestedBy} meminta ${r.partName}`, type: 'warning', action: 'kelola_sparepart' });
-      });
+      sparepartRequests.filter(r => r.status === 'Pending').forEach(r => 
+         notifs.push({ id: r.id, title: 'Request Part', text: `${r.requestedBy} meminta ${r.partName}`, type: 'warning', action: 'kelola_sparepart' })
+      );
     }
     if (currentUser.role === 'teknisi') {
-      const pendingPM = pmSchedules.filter(s => s.status === 'Pending' && availableMachines.find(m => m.id === s.machineId));
-      pendingPM.forEach(p => {
-         notifs.push({ id: p.id, title: 'Jadwal PM Baru', text: p.title, type: 'info', action: 'eksekusi_pm' });
-      });
+      pmSchedules.filter(s => s.status === 'Pending' && availableMachines.find(m => m.id === s.machineId)).forEach(p => 
+         notifs.push({ id: p.id, title: 'Jadwal PM Baru', text: p.title, type: 'info', action: 'eksekusi_pm' })
+      );
     }
     if (currentUser.role === 'user') {
-      const mySolved = breakdowns.filter(b => b.reportedBy === currentUser.name && b.status === 'Selesai Diperbaiki');
-      mySolved.forEach(b => {
-         notifs.push({ id: b.id, title: 'Mesin Selesai', text: `Perbaikan mesin telah selesai.`, type: 'success', action: 'req_perbaikan' });
-      });
+      breakdowns.filter(b => b.reportedBy === currentUser.name && b.status === 'Selesai Diperbaiki').forEach(b => 
+         notifs.push({ id: b.id, title: 'Mesin Selesai', text: `Perbaikan mesin telah selesai.`, type: 'success', action: 'req_perbaikan' })
+      );
     }
     setNotifications(notifs.slice(0, 8));
   }, [breakdowns, sparepartRequests, pmSchedules, currentUser, machines]);
@@ -172,6 +180,7 @@ export default function App() {
 
   const handleLogout = () => setCurrentUser(null);
 
+  // --- KOMPONEN UI UTAMA ---
   const ModalDialog = () => {
     if (!dialog) return null;
     return (
@@ -183,10 +192,7 @@ export default function App() {
             {dialog.type === 'confirm' && (
               <button onClick={() => setDialog(null)} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-300">Batal</button>
             )}
-            <button 
-              onClick={() => { if (dialog.onConfirm) dialog.onConfirm(); setDialog(null); }} 
-              className={`px-4 py-2 text-white rounded-lg text-sm font-medium shadow-sm transition-colors ${dialog.type === 'error' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}
-            >
+            <button onClick={() => { if (dialog.onConfirm) dialog.onConfirm(); setDialog(null); }} className={`px-4 py-2 text-white rounded-lg text-sm font-medium shadow-sm transition-colors ${dialog.type === 'error' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
               {dialog.type === 'confirm' ? 'Ya, Eksekusi' : 'Tutup'}
             </button>
           </div>
@@ -195,33 +201,70 @@ export default function App() {
     );
   };
 
-  const BarcodeScannerModal = ({ onScanSuccess, onClose }) => {
-    const [scriptLoaded, setScriptLoaded] = useState(false);
-    useEffect(() => {
-      if (window.Html5QrcodeScanner) { setScriptLoaded(true); return; }
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/html5-qrcode';
-      script.async = true;
-      script.onload = () => setScriptLoaded(true);
-      document.body.appendChild(script);
-    }, []);
-    useEffect(() => {
-      if (!scriptLoaded) return;
-      const html5QrcodeScanner = new window.Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 250 } }, false);
-      html5QrcodeScanner.render(
-        (decodedText) => { html5QrcodeScanner.clear(); onScanSuccess(decodedText); },
-        (error) => {}
-      );
-      return () => { html5QrcodeScanner.clear().catch(e => console.error(e)); };
-    }, [scriptLoaded, onScanSuccess]);
+  const ProfileEditModal = () => {
+    if (!profileDialog) return null;
+    const [form, setForm] = useState({ name: currentUser.name, username: currentUser.username, password: currentUser.password });
+    
+    const handleSaveProfile = async (e) => {
+      e.preventDefault();
+      await updateDoc(docRef('cmms_users', currentUser.id), form);
+      setCurrentUser({ ...currentUser, ...form });
+      setProfileDialog(false);
+      showMessage('Sukses', 'Profil berhasil diperbarui. Perubahan langsung diterapkan.', 'success');
+    };
+
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-75 z-[100] flex flex-col items-center justify-center p-4">
-        <div className="bg-white w-full max-w-md p-4 rounded-xl shadow-2xl relative">
-           <button onClick={onClose} className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-8 h-8 font-bold flex items-center justify-center z-10"><i className="fa-solid fa-xmark"></i></button>
-           <h3 className="text-center font-bold mb-4 text-gray-800 border-b pb-2">Arahkan Kamera ke QR Mesin</h3>
-           {!scriptLoaded && <p className="text-center text-sm text-blue-600 animate-pulse font-bold my-8">Menghidupkan Kamera...</p>}
-           <div id="reader" className="w-full overflow-hidden rounded-lg"></div>
-           <p className="text-[10px] text-center text-gray-500 mt-4 italic">* Pastikan Anda memberikan izin akses kamera.</p>
+      <div className="fixed inset-0 bg-black bg-opacity-75 z-[100] flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6">
+          <div className="flex justify-between items-center mb-4 border-b pb-2">
+            <h3 className="text-lg font-bold text-gray-800"><i className="fa-solid fa-user-pen text-blue-500 mr-2"></i> Edit Profil Saya</h3>
+            <button onClick={() => setProfileDialog(false)} className="text-gray-400 hover:text-red-500"><i className="fa-solid fa-xmark text-xl"></i></button>
+          </div>
+          <form onSubmit={handleSaveProfile} className="space-y-4">
+            <div><label className="block text-xs font-bold mb-1 text-gray-600">Nama Lengkap</label><input type="text" required className="w-full border p-2 rounded-lg" value={form.name} onChange={e => setForm({...form, name: e.target.value})} /></div>
+            <div><label className="block text-xs font-bold mb-1 text-gray-600">Username Login</label><input type="text" required className="w-full border p-2 rounded-lg" value={form.username} onChange={e => setForm({...form, username: e.target.value})} /></div>
+            <div><label className="block text-xs font-bold mb-1 text-gray-600">Password Baru</label><input type="text" required className="w-full border p-2 rounded-lg" value={form.password} onChange={e => setForm({...form, password: e.target.value})} /></div>
+            <button type="submit" className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg shadow mt-2">Simpan Profil</button>
+          </form>
+        </div>
+      </div>
+    );
+  };
+
+  // Komponen Real Camera Scanner
+  const CameraQRScanner = ({ onScanSuccess, onClose }) => {
+    useEffect(() => {
+      let scanner = null;
+      const initScanner = async () => {
+        try {
+          if (window.Html5QrcodeScanner) {
+            scanner = new window.Html5QrcodeScanner("reader", { fps: 10, qrbox: {width: 250, height: 250} }, false);
+            scanner.render(
+              (text) => { if(scanner){ scanner.clear(); onScanSuccess(text); } }, 
+              (error) => { /* abaikan error frame */ }
+            );
+          } else {
+             showMessage('Error', 'Library Scanner belum termuat, pastikan internet aktif.', 'error');
+             onClose();
+          }
+        } catch (err) { console.log(err); }
+      };
+      
+      // Delay sedikit memastikan div "reader" sudah mount
+      setTimeout(initScanner, 300);
+
+      return () => { if(scanner) { scanner.clear().catch(e => console.log(e)); } };
+    }, []);
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-90 z-[100] flex flex-col items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden relative">
+          <button onClick={onClose} className="absolute top-2 right-2 z-10 bg-red-500 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold hover:bg-red-600"><i className="fa-solid fa-xmark"></i></button>
+          <div className="p-4 bg-gray-900 text-white text-center"><h3 className="font-bold"><i className="fa-solid fa-camera mr-2"></i> Scan QR Aset Mesin</h3></div>
+          <div className="p-4">
+             <div id="reader" className="w-full min-h-[300px] overflow-hidden rounded-lg border-2 border-dashed border-gray-300"></div>
+             <p className="text-xs text-center text-gray-500 mt-4 italic">* Pastikan Anda memberikan izin (Allow) pada browser untuk mengakses kamera.</p>
+          </div>
         </div>
       </div>
     );
@@ -237,7 +280,9 @@ export default function App() {
           </div>
           <h2 className="text-2xl font-bold text-center mb-2 text-gray-800">CMMS Pro</h2>
           <p className="text-gray-500 text-center mb-6 text-sm">Sistem Manajemen Pemeliharaan</p>
-          {!isDbLoaded ? ( <p className="text-center text-blue-600 font-bold p-4 animate-pulse">Menghubungkan ke Database...</p>
+          
+          {!isDbLoaded ? (
+             <p className="text-center text-blue-600 font-bold p-4 animate-pulse">Menghubungkan ke Database...</p>
           ) : users.length === 0 ? (
             <div className="text-center p-4 bg-yellow-50 border border-yellow-200 rounded-lg mb-4">
               <p className="text-yellow-800 text-sm mb-3 font-bold">Database masih kosong!</p>
@@ -261,23 +306,21 @@ export default function App() {
     );
   }
 
-  // --- KOMPONEN DASHBOARD & KPI ---
+  // --- KOMPONEN MENU UTAMA ---
   const Dashboard = () => {
     const [viewMode, setViewMode] = useState('overview'); // overview, monthly, yearly
-    const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
-    const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString()); // YYYY
+    const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
+    const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
 
     const availableMachines = getAvailableMachines();
     const openBreakdowns = breakdowns.filter(b => b.status === 'Open' && availableMachines.find(m => m.id === b.machineId));
     const resolvedBreakdowns = breakdowns.filter(b => b.status === 'Selesai Diperbaiki' && availableMachines.find(m => m.id === b.machineId));
     const pendingPMs = pmSchedules.filter(s => s.status === 'Pending' && availableMachines.find(m => m.id === s.machineId));
     
-    // --- Logika Filter Data untuk KPI ---
+    // --- Kalkulasi KPI dengan Asumsi 40 Jam Kerja per Minggu ---
     const filterByDate = (dateString, periodStr, isYearly) => {
       if(!dateString) return false;
       if (isYearly) return dateString.includes(periodStr);
-      
-      // Handle Format Bulanan (YYYY-MM vs M/D/YYYY)
       const [y, m] = periodStr.split('-');
       const mNoZero = parseInt(m, 10).toString();
       return dateString.startsWith(periodStr) || 
@@ -288,11 +331,9 @@ export default function App() {
     const isYearly = viewMode === 'yearly';
     const periodStr = isYearly ? selectedYear : selectedMonth;
     
-    // 1. Data Filtered Breakdown & PM
     const periodBreakdowns = breakdowns.filter(b => availableMachines.find(m => m.id === b.machineId) && filterByDate(b.date, periodStr, isYearly));
     const periodPMs = pmSchedules.filter(s => availableMachines.find(m => m.id === s.machineId) && filterByDate(s.date, periodStr, isYearly));
     
-    // 2. Hitung LTI (Manual Input)
     const periodLTI = ltiLogs.filter(l => l.factory === (currentUser.factory === 'All' ? l.factory : currentUser.factory) && l.period === periodStr)
                              .reduce((sum, log) => sum + Number(log.count), 0);
 
@@ -304,7 +345,6 @@ export default function App() {
        }
     };
 
-    // 3. Hitung MTTR (Hours)
     let totalRepairHours = 0;
     let resolvedCount = 0;
     periodBreakdowns.forEach(b => {
@@ -319,21 +359,20 @@ export default function App() {
     });
     const kpiMTTR = resolvedCount > 0 ? (totalRepairHours / resolvedCount).toFixed(1) : 0;
 
-    // 4. Hitung MTBF (Hours)
-    const daysInPeriod = isYearly ? 365 : 30; // Asumsi standar
-    const totalMachineHours = availableMachines.length * (daysInPeriod * 24); // Asumsi pabrik 24/7
+    // MTBF dengan Asumsi 40 Jam Kerja per Minggu (160 jam/bulan, 2080 jam/tahun)
+    const workingHoursPerPeriod = isYearly ? 2080 : 160; 
+    const totalMachineHours = availableMachines.length * workingHoursPerPeriod;
     const totalFailures = periodBreakdowns.length;
+    
     const kpiMTBF = totalFailures > 0 ? (totalMachineHours / totalFailures).toFixed(0) : totalMachineHours;
+    const kpiMTBFPercent = totalMachineHours > 0 ? Math.max(0, (((totalMachineHours - totalRepairHours) / totalMachineHours) * 100)).toFixed(1) : 100;
 
-    // 5. Hitung PM Completion
     const totalScheduledPM = periodPMs.length;
     const completedPM = periodPMs.filter(p => p.status === 'Selesai' || p.status === 'Terverifikasi').length;
     const kpiPM = totalScheduledPM > 0 ? Math.round((completedPM / totalScheduledPM) * 100) : 100;
-
-    // 6. Hitung Backlog
     const kpiBacklog = periodBreakdowns.filter(b => b.status === 'Open').length;
 
-    // --- Overview Chart Logic ---
+    // Overview Chart
     const machineErrorCounts = {};
     breakdowns.filter(b => availableMachines.find(m => m.id === b.machineId)).forEach(b => {
        const mName = machines.find(m => m.id === b.machineId)?.name || 'Unknown';
@@ -348,11 +387,11 @@ export default function App() {
     return (
       <div className="space-y-6">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
-          <h2 className="text-2xl font-bold text-gray-800">Pusat Informasi Dashboard</h2>
-          <div className="bg-gray-200 p-1 rounded-lg flex space-x-1 w-full md:w-auto">
-            <button onClick={()=>setViewMode('overview')} className={`flex-1 md:flex-none px-4 py-2 text-sm font-bold rounded-md transition-colors ${viewMode === 'overview' ? 'bg-white shadow text-gray-800' : 'text-gray-500'}`}>Overview</button>
-            <button onClick={()=>setViewMode('monthly')} className={`flex-1 md:flex-none px-4 py-2 text-sm font-bold rounded-md transition-colors ${viewMode === 'monthly' ? 'bg-blue-600 shadow text-white' : 'text-gray-500'}`}>KPI Bulanan</button>
-            <button onClick={()=>setViewMode('yearly')} className={`flex-1 md:flex-none px-4 py-2 text-sm font-bold rounded-md transition-colors ${viewMode === 'yearly' ? 'bg-indigo-600 shadow text-white' : 'text-gray-500'}`}>KPI Tahunan</button>
+          <h2 className="text-2xl font-bold text-gray-800">Dashboard & Panel Informasi</h2>
+          <div className="bg-gray-200 p-1 rounded-lg flex space-x-1 w-full md:w-auto overflow-x-auto">
+            <button onClick={()=>setViewMode('overview')} className={`whitespace-nowrap flex-1 md:flex-none px-4 py-2 text-sm font-bold rounded-md transition-colors ${viewMode === 'overview' ? 'bg-white shadow text-gray-800' : 'text-gray-500'}`}>Overview</button>
+            <button onClick={()=>setViewMode('monthly')} className={`whitespace-nowrap flex-1 md:flex-none px-4 py-2 text-sm font-bold rounded-md transition-colors ${viewMode === 'monthly' ? 'bg-blue-600 shadow text-white' : 'text-gray-500'}`}>KPI Bulanan</button>
+            <button onClick={()=>setViewMode('yearly')} className={`whitespace-nowrap flex-1 md:flex-none px-4 py-2 text-sm font-bold rounded-md transition-colors ${viewMode === 'yearly' ? 'bg-indigo-600 shadow text-white' : 'text-gray-500'}`}>KPI Tahunan</button>
           </div>
         </div>
 
@@ -438,7 +477,7 @@ export default function App() {
 
              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                 {/* MTBF Card */}
-                <div className="bg-white p-6 rounded-xl shadow-md border-t-8 border-green-500">
+                <div className="bg-white p-6 rounded-xl shadow-md border-t-8 border-green-500 relative">
                    <div className="flex justify-between items-start mb-4">
                       <div>
                         <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">MTBF</p>
@@ -446,11 +485,14 @@ export default function App() {
                       </div>
                       <i className="fa-solid fa-stopwatch text-3xl text-green-200"></i>
                    </div>
-                   <div className="flex items-baseline gap-2">
+                   <div className="flex items-baseline gap-2 mb-2">
                      <span className="text-4xl md:text-5xl font-black text-gray-800">{kpiMTBF}</span>
                      <span className="text-lg font-bold text-gray-500">Jam</span>
                    </div>
-                   <p className="text-[10px] text-gray-400 mt-4 leading-tight">*Rata-rata waktu keandalan mesin beroperasi sebelum mengalami kerusakan dalam periode ini.</p>
+                   <div className="bg-green-50 px-3 py-1.5 rounded-lg border border-green-200 inline-block">
+                      <span className="text-xs font-bold text-green-800"><i className="fa-solid fa-percent mr-1"></i> Reliability: {kpiMTBFPercent}%</span>
+                   </div>
+                   <p className="text-[10px] text-gray-400 mt-4 leading-tight">*Asumsi {workingHoursPerPeriod} jam operasi / mesin di periode ini (40 jam/minggu).</p>
                 </div>
 
                 {/* MTTR Card */}
@@ -531,12 +573,10 @@ export default function App() {
           <p className="text-gray-600 text-sm">Anda login sebagai <strong>{currentUser.role.toUpperCase()}</strong>. Lingkup operasional: <span className="bg-blue-200 text-blue-800 px-2 py-0.5 rounded font-bold">{currentUser.factory}</span>.</p>
         </div>
 
-        {/* ... (Sisa panel monitoring Admin tidak berubah, langsung diteruskan) ... */}
         {currentUser.role === 'admin' && viewMode === 'overview' && (
           <div className="space-y-6 animate-[fadeIn_0.3s]">
             <h3 className="text-xl font-bold text-gray-800 border-b pb-2"><i className="fa-solid fa-desktop mr-2 text-gray-500"></i> Panel Log Aktivitas</h3>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              
               <div className="bg-white p-5 rounded-xl shadow-sm border border-red-100">
                 <h4 className="font-bold text-red-700 mb-4 flex items-center"><i className="fa-solid fa-triangle-exclamation mr-2"></i> Perbaikan Pending</h4>
                 <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
@@ -582,35 +622,6 @@ export default function App() {
                     )
                   }) : <p className="text-sm text-gray-500 italic text-center py-8 border border-dashed rounded-lg">Belum ada perbaikan diselesaikan.</p>}
                 </div>
-              </div>
-            </div>
-            
-            <div className="bg-white p-5 rounded-xl shadow-sm border border-blue-100">
-              <h4 className="font-bold text-blue-700 mb-4 flex items-center"><i className="fa-solid fa-list-check mr-2"></i> Daily Activity Teknisi</h4>
-              <div className="overflow-x-auto rounded-lg border border-blue-200">
-                <table className="w-full text-sm border-collapse min-w-[600px]">
-                  <thead>
-                    <tr className="bg-blue-100 text-left">
-                      <th className="p-3 font-semibold text-blue-900">Tanggal</th>
-                      <th className="p-3 font-semibold text-blue-900">Teknisi</th>
-                      <th className="p-3 font-semibold text-blue-900">Pabrik</th>
-                      <th className="p-3 font-semibold text-blue-900">Aktivitas</th>
-                      <th className="p-3 font-semibold text-blue-900">Waktu</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white">
-                    {dailyActivities.slice().reverse().map(act => (
-                      <tr key={act.id} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="p-3 whitespace-nowrap text-gray-600">{act.date}</td>
-                        <td className="p-3 font-semibold text-gray-800">{act.teknisi}</td>
-                        <td className="p-3"><span className="text-[10px] uppercase font-bold bg-gray-200 text-gray-700 px-2 py-1 rounded">{act.factory}</span></td>
-                        <td className="p-3 text-gray-700">{act.activity}</td>
-                        <td className="p-3 whitespace-nowrap text-gray-500 font-medium">{act.startTime} - {act.endTime}</td>
-                      </tr>
-                    ))}
-                    {dailyActivities.length === 0 && <tr><td colSpan="5" className="p-8 text-center text-gray-500 italic">Belum ada aktivitas.</td></tr>}
-                  </tbody>
-                </table>
               </div>
             </div>
           </div>
@@ -785,6 +796,10 @@ export default function App() {
     const [selectedMachineParams, setSelectedMachineParams] = useState(null);
     const [tempParams, setTempParams] = useState([]);
     const [newParamText, setNewParamText] = useState('');
+    
+    // Fitur Filter & Search Mesin
+    const [filterFactory, setFilterFactory] = useState('All');
+    const [searchMachine, setSearchMachine] = useState('');
 
     const handleAddMachine = async (e) => {
       e.preventDefault();
@@ -819,36 +834,28 @@ export default function App() {
     const handlePrintQR = (machine) => {
       const printWindow = window.open('', '_blank');
       const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(machine.code)}`;
-      
       printWindow.document.write(`
-        <html>
-          <head>
-            <title>Cetak Label QR - ${machine.name}</title>
-            <style>
-              body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #e5e7eb; }
-              .label-card { background: white; padding: 20px; border: 2px dashed #1f2937; text-align: center; border-radius: 16px; width: 280px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-              .label-card img { width: 200px; height: 200px; margin: 10px auto; display: block; border: 4px solid #f3f4f6; border-radius: 8px;}
-              h2 { margin: 0 0 5px 0; font-size: 22px; color: #111827; text-transform: uppercase; font-weight: 900;}
-              p.code { margin: 0; font-size: 16px; font-weight: bold; background: #111827; color: white; display: inline-block; padding: 4px 12px; border-radius: 4px; margin-bottom: 10px;}
-              p.loc { margin: 0; font-size: 12px; color: #4b5563; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;}
-              @media print { 
-                body { background: white; align-items: flex-start; justify-content: flex-start; padding: 20px;} 
-                .label-card { box-shadow: none; border: 1px solid #000; } 
-              }
-            </style>
-          </head>
-          <body>
-            <div class="label-card">
-              <h2>${machine.name}</h2>
-              <p class="code">${machine.code}</p>
-              <img src="${qrUrl}" alt="QR Code" onload="window.print(); window.close();" />
-              <p class="loc">LOKASI: ${machine.factory}</p>
-            </div>
-          </body>
-        </html>
+        <html><head><title>Cetak Label QR - ${machine.name}</title><style>
+          body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #e5e7eb; }
+          .label-card { background: white; padding: 20px; border: 2px dashed #1f2937; text-align: center; border-radius: 16px; width: 280px; }
+          .label-card img { width: 200px; height: 200px; margin: 10px auto; display: block; border: 4px solid #f3f4f6; border-radius: 8px;}
+          h2 { margin: 0 0 5px 0; font-size: 22px; color: #111827; text-transform: uppercase; font-weight: 900;}
+          p.code { margin: 0; font-size: 16px; font-weight: bold; background: #111827; color: white; display: inline-block; padding: 4px 12px; border-radius: 4px; margin-bottom: 10px;}
+          p.loc { margin: 0; font-size: 12px; color: #4b5563; font-weight: bold; text-transform: uppercase;}
+          @media print { body { background: white; align-items: flex-start; justify-content: flex-start; padding: 20px;} .label-card { border: 1px solid #000; box-shadow: none; } }
+        </style></head><body>
+          <div class="label-card"><h2>${machine.name}</h2><p class="code">${machine.code}</p>
+          <img src="${qrUrl}" alt="QR" onload="window.print(); window.close();" /><p class="loc">LOKASI: ${machine.factory}</p></div>
+        </body></html>
       `);
       printWindow.document.close();
     };
+
+    const filteredMachines = machines.filter(m => {
+       const matchFact = filterFactory === 'All' || m.factory === filterFactory;
+       const matchSearch = m.name.toLowerCase().includes(searchMachine.toLowerCase()) || m.code.toLowerCase().includes(searchMachine.toLowerCase());
+       return matchFact && matchSearch;
+    });
 
     return (
       <div className="space-y-6">
@@ -859,7 +866,7 @@ export default function App() {
             <form onSubmit={handleAddMachine} className="space-y-3 bg-gray-50 p-4 rounded-lg border border-gray-100">
               <div className="flex flex-col sm:flex-row gap-3">
                 <div className="sm:w-1/3">
-                  <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Kode Mesin (U/ Barcode)</label>
+                  <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Kode (U/ Barcode)</label>
                   <input type="text" required className="w-full border p-2 rounded" value={newMachine.code} onChange={e => setNewMachine({...newMachine, code: e.target.value})} />
                 </div>
                 <div className="flex-1">
@@ -882,13 +889,21 @@ export default function App() {
               <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 mt-2 rounded-lg font-bold shadow-sm w-full"><i className="fa-solid fa-plus mr-2"></i> Tambah Mesin</button>
             </form>
 
-            <div className="mt-6">
-              <h4 className="font-bold text-gray-700 mb-3 flex items-center justify-between">
-                <span>Daftar Aset Mesin</span><span className="text-xs bg-gray-200 px-2 py-1 rounded-full">{machines.length} Mesin</span>
-              </h4>
+            <div className="mt-6 border-t pt-4">
+              <div className="flex flex-col md:flex-row justify-between items-center mb-4 gap-2">
+                 <h4 className="font-bold text-gray-700">Daftar Aset Mesin</h4>
+                 <div className="flex gap-2 w-full md:w-auto">
+                    <select className="border p-1.5 rounded text-xs bg-gray-50 font-bold" value={filterFactory} onChange={e => setFilterFactory(e.target.value)}>
+                      <option value="All">Semua Pabrik</option>
+                      {factories.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
+                    </select>
+                    <input type="text" placeholder="Cari nama mesin..." className="border p-1.5 rounded text-xs flex-1" value={searchMachine} onChange={e => setSearchMachine(e.target.value)} />
+                 </div>
+              </div>
+
               <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
-                {machines.map(m => (
-                  <div key={m.id} className="flex flex-col sm:flex-row sm:justify-between items-start sm:items-center bg-white p-4 rounded-lg border border-gray-200 shadow-sm gap-3">
+                {filteredMachines.map(m => (
+                  <div key={m.id} className="flex flex-col sm:flex-row sm:justify-between items-start sm:items-center bg-white p-4 rounded-lg border border-gray-200 shadow-sm gap-3 hover:border-blue-300">
                     <div className="flex items-start">
                       <div className="bg-blue-50 text-blue-600 p-2 rounded-lg mr-3 mt-1"><i className="fa-solid fa-box-open"></i></div>
                       <div>
@@ -897,12 +912,13 @@ export default function App() {
                       </div>
                     </div>
                     <div className="flex gap-2 w-full sm:w-auto">
-                       <button type="button" onClick={() => handlePrintQR(m)} className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-xs px-3 py-2 rounded-lg font-bold border border-indigo-200" title="Cetak Label QR Mesin"><i className="fa-solid fa-qrcode"></i></button>
+                       <button type="button" onClick={() => handlePrintQR(m)} className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-xs px-3 py-2 rounded-lg font-bold border border-indigo-200"><i className="fa-solid fa-qrcode"></i></button>
                        <button type="button" onClick={() => handleSelectMachineParams(m.id)} className="flex-1 sm:flex-none bg-gray-800 hover:bg-black text-white text-xs px-3 py-2 rounded-lg font-bold">Setup Cek</button>
                        <button type="button" onClick={() => handleDeleteMachine(m.id, m.name)} className="bg-red-100 hover:bg-red-200 text-red-600 text-xs px-3 py-2 rounded-lg font-bold border border-red-200"><i className="fa-solid fa-trash"></i></button>
                     </div>
                   </div>
                 ))}
+                {filteredMachines.length === 0 && <p className="text-center py-6 italic text-gray-400 text-sm">Mesin tidak ditemukan.</p>}
               </div>
             </div>
           </div>
@@ -942,18 +958,19 @@ export default function App() {
     const [activeTab, setActiveTab] = useState('stok'); 
     const [editSpId, setEditSpId] = useState(null);
     const [editSpForm, setEditSpForm] = useState({ code: '', name: '', factory: '', unit: '' });
+    
+    // Search by Name feature
+    const [searchPart, setSearchPart] = useState('');
 
     const handleAddSparepart = async (e) => {
       e.preventDefault();
       const newPartData = { ...spForm, stock: Number(spForm.stock) };
       const docRefId = await addDoc(colRef('cmms_spareparts'), newPartData);
-      
       await addDoc(colRef('cmms_sparepart_logs'), {
         partId: docRefId.id, partCode: spForm.code, partName: spForm.name, factory: spForm.factory,
         date: new Date().toLocaleString(), type: 'IN', qty: Number(spForm.stock), unit: spForm.unit,
         remarks: 'Stok Awal', user: currentUser.name
       });
-      
       setSpForm({ code: '', name: '', factory: defaultFactory, stock: '', unit: 'pcs' });
       showMessage('Berhasil', 'Sparepart baru ditambahkan.', 'success');
     };
@@ -975,11 +992,6 @@ export default function App() {
       }
     };
 
-    const handleEditClick = (sp) => {
-      setEditSpId(sp.id);
-      setEditSpForm({ code: sp.code, name: sp.name, factory: sp.factory, unit: sp.unit });
-    };
-
     const handleSaveEditSp = async (id) => {
       await updateDoc(docRef('cmms_spareparts', id), {
         code: editSpForm.code, name: editSpForm.name, factory: editSpForm.factory, unit: editSpForm.unit
@@ -994,6 +1006,9 @@ export default function App() {
         showMessage('Dihapus', 'Data sparepart berhasil dihapus.', 'success');
       });
     };
+
+    // Filter parts by Search Query (Name)
+    const filteredParts = spareparts.filter(sp => sp.name.toLowerCase().includes(searchPart.toLowerCase()));
 
     return (
       <div className="space-y-6">
@@ -1028,11 +1043,18 @@ export default function App() {
             </div>
             
             <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm lg:col-span-2 overflow-hidden flex flex-col">
-              <h3 className="font-semibold text-lg mb-4 text-gray-800">Daftar Stok</h3>
-              <div className="overflow-x-auto w-full">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
+                 <h3 className="font-semibold text-lg text-gray-800">Daftar Stok</h3>
+                 {/* Fungsi Pencarian Sparepart by Nama */}
+                 <div className="relative w-full sm:w-auto">
+                    <i className="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-gray-400"></i>
+                    <input type="text" placeholder="Cari nama part..." className="border p-2 pl-9 rounded-lg text-sm w-full sm:w-64 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none" value={searchPart} onChange={e => setSearchPart(e.target.value)} />
+                 </div>
+              </div>
+              <div className="overflow-x-auto w-full max-h-[500px]">
                 <table className="w-full text-sm border-collapse min-w-[600px]">
-                  <thead>
-                    <tr className="bg-gray-100 text-left">
+                  <thead className="sticky top-0 bg-gray-100 z-10">
+                    <tr className="text-left">
                       <th className="p-3 font-semibold text-gray-700 w-24">Kode</th>
                       <th className="p-3 font-semibold text-gray-700">Nama Part</th>
                       <th className="p-3 font-semibold text-gray-700 w-24">Lokasi</th>
@@ -1041,7 +1063,7 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {spareparts.map(sp => (
+                    {filteredParts.map(sp => (
                       <tr key={sp.id} className="border-b hover:bg-gray-50">
                         {editSpId === sp.id ? (
                           <>
@@ -1069,14 +1091,14 @@ export default function App() {
                             <td className="p-3 text-center font-black text-blue-700">{sp.stock} <span className="text-xs font-normal text-gray-500">{sp.unit}</span></td>
                             <td className="p-3 text-center flex flex-wrap justify-center gap-1">
                               <button onClick={() => handleAddStock(sp.id, sp.name, sp.stock)} className="bg-green-100 hover:bg-green-200 text-green-700 px-2 py-1 rounded border border-green-200 text-xs font-bold whitespace-nowrap">+ Stok</button>
-                              <button onClick={() => handleEditClick(sp)} className="bg-yellow-100 hover:bg-yellow-200 text-yellow-700 px-2 py-1 rounded border border-yellow-200 text-xs"><i className="fa-solid fa-pen"></i></button>
+                              <button onClick={() => {setEditSpId(sp.id); setEditSpForm({ code: sp.code, name: sp.name, factory: sp.factory, unit: sp.unit });}} className="bg-yellow-100 hover:bg-yellow-200 text-yellow-700 px-2 py-1 rounded border border-yellow-200 text-xs"><i className="fa-solid fa-pen"></i></button>
                               <button onClick={() => handleDeleteSp(sp.id, sp.name)} className="bg-red-100 hover:bg-red-200 text-red-600 px-2 py-1 rounded border border-red-200 text-xs"><i className="fa-solid fa-trash"></i></button>
                             </td>
                           </>
                         )}
                       </tr>
                     ))}
-                    {spareparts.length === 0 && <tr><td colSpan="5" className="p-6 text-center text-gray-400">Belum ada data sparepart.</td></tr>}
+                    {filteredParts.length === 0 && <tr><td colSpan="5" className="p-6 text-center text-gray-400">Tidak ada sparepart yang sesuai pencarian.</td></tr>}
                   </tbody>
                 </table>
               </div>
@@ -1120,6 +1142,9 @@ export default function App() {
     const [newTaskText, setNewTaskText] = useState('');
     const [editSchId, setEditSchId] = useState(null);
     const [editSchForm, setEditSchForm] = useState({ title: '', date: '' });
+    
+    // Fitur Filter Pabrik di Jadwal PM
+    const [filterFactory, setFilterFactory] = useState('All');
 
     const handleCreateSchedule = async (e) => {
       e.preventDefault();
@@ -1164,6 +1189,11 @@ export default function App() {
       showMessage('Berhasil', 'Data jadwal diperbarui.', 'success');
     };
 
+    const filteredSchedules = pmSchedules.filter(sch => {
+       const machine = machines.find(m => m.id === sch.machineId);
+       return filterFactory === 'All' || machine?.factory === filterFactory;
+    });
+
     return (
       <div className="space-y-6">
         <h2 className="text-2xl font-bold text-gray-800">Perencanaan & Verifikasi PM</h2>
@@ -1180,9 +1210,15 @@ export default function App() {
               <button type="submit" className="bg-blue-600 text-white px-4 py-3 rounded-xl w-full font-bold">Terbitkan Instruksi</button>
             </form>
             <div className="mt-8 border-t pt-6">
-              <h4 className="font-bold text-gray-700 mb-3">Daftar Arsip & Jadwal PM</h4>
+              <div className="flex justify-between items-center mb-3">
+                 <h4 className="font-bold text-gray-700">Daftar Arsip & Jadwal PM</h4>
+                 <select className="border p-1.5 rounded text-xs bg-gray-50 font-bold" value={filterFactory} onChange={e => setFilterFactory(e.target.value)}>
+                    <option value="All">Semua Pabrik</option>
+                    {factories.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
+                 </select>
+              </div>
               <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
-                {pmSchedules.map(sch => (
+                {filteredSchedules.map(sch => (
                   <div key={sch.id} onClick={() => handleSelectSchedule(sch.id)} className={`p-4 border rounded-xl cursor-pointer ${selectedSchedule === sch.id ? 'border-indigo-500 bg-indigo-50' : 'bg-white'}`}>
                     {editSchId === sch.id ? (
                       <div className="space-y-2" onClick={e => e.stopPropagation()}>
@@ -1213,6 +1249,7 @@ export default function App() {
                     )}
                   </div>
                 ))}
+                {filteredSchedules.length === 0 && <p className="text-center italic text-gray-400 py-6 text-sm">Tidak ada jadwal PM di pabrik ini.</p>}
               </div>
             </div>
           </div>
@@ -1501,22 +1538,8 @@ export default function App() {
   const CekHarian = () => {
     const [selectedMachine, setSelectedMachine] = useState(null);
     const [checkData, setCheckData] = useState({});
-    const [showScanner, setShowScanner] = useState(false);
     const availableMachines = getAvailableMachines();
     const params = selectedMachine ? dailyParams.filter(p => p.machineId === selectedMachine) : [];
-
-    const handleScanComplete = (decodedText) => {
-       setShowScanner(false);
-       const scannedMachine = availableMachines.find(m => m.code.toLowerCase() === decodedText.toLowerCase());
-       
-       if (scannedMachine) {
-          setSelectedMachine(scannedMachine.id);
-          setCheckData({});
-          showMessage('Scan Sukses', `Mesin ${scannedMachine.name} terpilih otomatis.`, 'success');
-       } else {
-          showMessage('Scan Gagal', `Kode mesin "${decodedText}" tidak ditemukan di area Anda.`, 'error');
-       }
-    };
 
     const handleSaveCheck = async (e) => {
       e.preventDefault();
@@ -1526,13 +1549,27 @@ export default function App() {
       setCheckData({});
     };
 
+    const handleQRSuccess = (code) => {
+       const m = availableMachines.find(x => x.code === code);
+       if (m) {
+          setSelectedMachine(m.id);
+          setCheckData({});
+          setShowScanner(false);
+          showMessage('Scan Sukses', `Mesin terpilih: ${m.name}`, 'success');
+       } else {
+          showMessage('Scan Gagal', `Mesin dengan kode ${code} tidak ditemukan.`, 'error');
+       }
+    };
+
     return (
       <div className="space-y-6">
-        {showScanner && <BarcodeScannerModal onScanSuccess={handleScanComplete} onClose={() => setShowScanner(false)} />}
+        {showScanner && <CameraQRScanner onScanSuccess={handleQRSuccess} onClose={() => setShowScanner(false)} />}
         
         <div className="flex justify-between items-center">
            <h2 className="text-2xl font-bold text-gray-800">Form Checklist Harian</h2>
-           <button onClick={() => setShowScanner(true)} className="bg-gray-800 text-white px-4 py-2 rounded-lg font-bold shadow-md hover:bg-black"><i className="fa-solid fa-qrcode mr-2"></i> Scan QR Mesin</button>
+           <button onClick={() => setShowScanner(true)} className="bg-gray-800 hover:bg-black text-white px-4 py-2 rounded shadow-md text-sm font-bold flex items-center">
+              <i className="fa-solid fa-qrcode mr-2"></i> Scan QR Aset
+           </button>
         </div>
 
         <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-100">
@@ -1546,7 +1583,6 @@ export default function App() {
             ))}
           </div>
         </div>
-
         {selectedMachine && (
           <div className="bg-white p-4 md:p-6 rounded-xl shadow-xl border-t-8 border-blue-500 animate-[fadeIn_0.3s]">
             <h3 className="text-lg md:text-xl font-bold mb-6 flex items-center border-b pb-4"><i className="fa-solid fa-list-check text-blue-500 mr-3"></i> Checklist: {machines.find(m=>m.id === selectedMachine)?.name}</h3>
@@ -2012,10 +2048,78 @@ export default function App() {
     );
   };
 
+  const InfoKPI = () => (
+    <div className="space-y-6">
+       <h2 className="text-2xl font-bold text-gray-800 border-b-2 pb-2"><i className="fa-solid fa-book-open text-blue-600 mr-2"></i> Panduan Penghitungan KPI</h2>
+       <div className="bg-white p-6 md:p-8 rounded-xl shadow-sm border space-y-8">
+          
+          <div>
+             <h3 className="text-lg font-black text-green-700 flex items-center mb-2"><i className="fa-solid fa-stopwatch mr-2"></i> 1. MTBF (Mean Time Between Failures)</h3>
+             <p className="text-gray-700 text-sm mb-2">Mengukur rata-rata keandalan sebuah mesin. Semakin tinggi angkanya, semakin jarang mesin tersebut rusak.</p>
+             <div className="bg-gray-50 p-4 border rounded">
+                <p className="font-bold text-xs uppercase mb-1">Rumus:</p>
+                <code className="text-sm bg-gray-200 px-2 py-1 rounded block mb-3 font-mono">Total Jam Operasi Mesin / Jumlah Kerusakan</code>
+                <p className="font-bold text-xs uppercase mb-1 mt-2">Logika Sistem:</p>
+                <ul className="list-disc pl-5 text-sm text-gray-600">
+                   <li>Sistem berasumsi jam operasional mesin adalah <strong>40 Jam/Minggu</strong>.</li>
+                   <li>Maka per 1 Bulan = 160 Jam, per 1 Tahun = 2080 Jam.</li>
+                   <li>Contoh Bulan ini ada 10 mesin. Total jam operasi = 1600 Jam. Jika terjadi 4 kerusakan, MTBF = 1600 / 4 = 400 Jam.</li>
+                   <li><strong>% Reliability:</strong> Dihitung dari <code>((Total Jam Operasi - Total Jam Perbaikan) / Total Jam Operasi) * 100</code>.</li>
+                </ul>
+             </div>
+          </div>
+
+          <div>
+             <h3 className="text-lg font-black text-yellow-600 flex items-center mb-2"><i className="fa-solid fa-tools mr-2"></i> 2. MTTR (Mean Time To Repair)</h3>
+             <p className="text-gray-700 text-sm mb-2">Mengukur kecepatan teknisi dalam menangani mesin rusak. Semakin kecil angkanya, semakin efisien tim teknisi Anda.</p>
+             <div className="bg-gray-50 p-4 border rounded">
+                <p className="font-bold text-xs uppercase mb-1">Rumus:</p>
+                <code className="text-sm bg-gray-200 px-2 py-1 rounded block mb-3 font-mono">Total Waktu Perbaikan / Total Kerusakan Selesai</code>
+                <p className="font-bold text-xs uppercase mb-1 mt-2">Logika Sistem:</p>
+                <ul className="list-disc pl-5 text-sm text-gray-600">
+                   <li>Diambil berdasarkan selisih <strong>Jam Mulai Perbaikan</strong> dan <strong>Jam Selesai Perbaikan</strong> yang diinput teknisi saat menyelesaian Tiket Breakdown.</li>
+                </ul>
+             </div>
+          </div>
+
+          <div>
+             <h3 className="text-lg font-black text-blue-600 flex items-center mb-2"><i className="fa-solid fa-calendar-check mr-2"></i> 3. PM Completion (Penyelesaian Perawatan)</h3>
+             <p className="text-gray-700 text-sm mb-2">Mengukur tingkat kepatuhan (Compliance) tim terhadap jadwal perawatan mesin.</p>
+             <div className="bg-gray-50 p-4 border rounded">
+                <p className="font-bold text-xs uppercase mb-1">Rumus:</p>
+                <code className="text-sm bg-gray-200 px-2 py-1 rounded block mb-3 font-mono">(Jumlah PM Selesai / Total Jadwal PM Bulan Ini) * 100%</code>
+             </div>
+          </div>
+
+          <div>
+             <h3 className="text-lg font-black text-orange-600 flex items-center mb-2"><i className="fa-solid fa-clipboard-list mr-2"></i> 4. Backlog Work Order</h3>
+             <p className="text-gray-700 text-sm mb-2">Menunjukkan "Tunggakan Pekerjaan". Jika Backlog tinggi, artinya teknisi kekurangan waktu atau Sparepart sedang kosong.</p>
+             <div className="bg-gray-50 p-4 border rounded">
+                <ul className="list-disc pl-5 text-sm text-gray-600">
+                   <li>Sistem menghitung total tiket breakdown yang berstatus <strong>"Open"</strong> (Belum selesai diperbaiki) di periode terpilih.</li>
+                </ul>
+             </div>
+          </div>
+
+          <div>
+             <h3 className="text-lg font-black text-red-600 flex items-center mb-2"><i className="fa-solid fa-truck-medical mr-2"></i> 5. LTI (Lost Time Incident)</h3>
+             <p className="text-gray-700 text-sm mb-2">Indikator Keselamatan/Safety pabrik. Jumlah kecelakaan kerja yang menyebabkan hilangnya waktu kerja efektif.</p>
+             <div className="bg-gray-50 p-4 border rounded">
+                <ul className="list-disc pl-5 text-sm text-gray-600">
+                   <li>Karena datanya berada di luar lingkup mesin, LTI harus <strong>diinput secara manual</strong> oleh Admin di halaman KPI Dashboard dengan mengklik tombol "+ Catat LTI".</li>
+                   <li>Target mutlak untuk semua pabrik adalah <strong>0 (Nol) Kejadian</strong>.</li>
+                </ul>
+             </div>
+          </div>
+
+       </div>
+    </div>
+  );
+
   const NavItem = ({ id, icon, label, roles }) => {
     if (!roles.includes(currentUser.role)) return null;
     return (
-      <button onClick={() => {setActiveMenu(id); setIsSidebarOpen(false)}} className={`w-full flex items-center px-4 py-3 rounded-lg text-left font-medium text-sm ${activeMenu === id ? 'bg-blue-600 text-white' : 'text-blue-100 hover:bg-blue-800'}`}>
+      <button onClick={() => {setActiveMenu(id); setIsSidebarOpen(false)}} className={`w-full flex items-center px-4 py-3 rounded-lg text-left font-medium text-sm ${activeMenu === id ? 'bg-blue-600 text-white shadow' : 'text-blue-100 hover:bg-blue-800'}`}>
         <i className={`fa-solid ${icon} w-6 mr-3 text-lg`}></i> <span>{label}</span>
       </button>
     );
@@ -2024,91 +2128,104 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50 flex text-gray-900 font-sans">
       <ModalDialog />
+      <ProfileEditModal />
       
       {isSidebarOpen && <div className="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden print:hidden" onClick={() => setIsSidebarOpen(false)}></div>}
       
       <aside className={`print:hidden fixed inset-y-0 left-0 bg-gray-900 text-white w-72 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-transform z-30 flex flex-col shadow-2xl`}>
         <div className="p-6 border-b border-gray-800 bg-gray-950 flex justify-between items-center shrink-0">
-          <h1 className="text-xl font-black uppercase tracking-widest text-blue-400">CMMS Pro</h1>
+          <div>
+            <h1 className="text-xl font-black uppercase tracking-widest text-blue-400">CMMS Pro</h1>
+            <p className="text-[10px] text-gray-400 font-medium tracking-wide">By Pamungkas</p>
+          </div>
           <button className="md:hidden text-gray-400 hover:text-white" onClick={() => setIsSidebarOpen(false)}><i className="fa-solid fa-xmark text-xl"></i></button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 pb-24">
-          <div className="mb-6 bg-gray-800 p-4 rounded-xl border border-gray-700">
-            <p className="font-bold text-white mb-2">{currentUser.name}</p>
-            <div className="flex flex-wrap gap-2">
-              <span className="text-[9px] uppercase font-bold bg-blue-600 px-2 py-1 rounded">{currentUser.role}</span>
-              <span className="text-[9px] uppercase font-bold bg-gray-700 px-2 py-1 rounded">{currentUser.factory}</span>
+          <div className="mb-6 bg-gray-800 p-4 rounded-xl border border-gray-700 flex justify-between items-start">
+            <div>
+              <p className="font-bold text-white mb-2">{currentUser.name}</p>
+              <div className="flex flex-wrap gap-2">
+                <span className="text-[9px] uppercase font-bold bg-blue-600 px-2 py-1 rounded">{currentUser.role}</span>
+                <span className="text-[9px] uppercase font-bold bg-gray-700 px-2 py-1 rounded">{currentUser.factory}</span>
+              </div>
             </div>
+            <button onClick={() => setProfileDialog(true)} className="text-gray-400 hover:text-white p-2" title="Edit Profil"><i className="fa-solid fa-user-pen"></i></button>
           </div>
           <nav className="space-y-1">
-            <NavItem id="dashboard" icon="fa-chart-pie" label="Dashboard & KPI" roles={['admin', 'teknisi', 'user']} />
+            <NavItem id="dashboard" icon="fa-chart-pie" label="Dashboard" roles={['admin', 'teknisi', 'user']} />
             <div className={currentUser.role === 'admin' ? 'pt-4 pb-2' : 'hidden'}>
-              <p className="text-[10px] font-bold text-gray-500 uppercase px-4 mb-2">Manajemen Admin</p>
+              <p className="text-[10px] font-bold text-gray-500 uppercase px-4 mb-2 mt-2">Manajemen Admin</p>
               <NavItem id="kelola_pabrik" icon="fa-city" label="Master Pabrik / Lokasi" roles={['admin']} />
               <NavItem id="kelola_user" icon="fa-users-gear" label="Manajemen Akun" roles={['admin']} />
               <NavItem id="kelola_mesin" icon="fa-network-wired" label="Aset & Parameter" roles={['admin']} />
               <NavItem id="kelola_sparepart" icon="fa-boxes-stacked" label="Manajemen Sparepart" roles={['admin']} />
               <NavItem id="setup_pm" icon="fa-calendar-days" label="Jadwal & Verifikasi PM" roles={['admin']} />
               <NavItem id="cetak" icon="fa-print" label="Pusat Dokumen (Cetak)" roles={['admin']} />
+              <NavItem id="info_kpi" icon="fa-circle-info" label="Cara Penghitungan KPI" roles={['admin']} />
             </div>
             <div className={currentUser.role === 'teknisi' ? 'pt-4 pb-2' : 'hidden'}>
-              <p className="text-[10px] font-bold text-gray-500 uppercase px-4 mb-2">Tugas Teknisi</p>
+              <p className="text-[10px] font-bold text-gray-500 uppercase px-4 mb-2 mt-2">Tugas Teknisi</p>
               <NavItem id="daily_activity" icon="fa-book-open" label="Buku Jurnal Harian" roles={['teknisi']} />
               <NavItem id="cek_harian" icon="fa-clipboard-list" label="Checklist Rutin Mesin" roles={['teknisi']} />
               <NavItem id="penanganan_rusak" icon="fa-screwdriver-wrench" label="Tangani Breakdown" roles={['teknisi']} />
               <NavItem id="eksekusi_pm" icon="fa-business-time" label="Jadwal PM Aktif" roles={['teknisi']} />
               <NavItem id="teknisi_sparepart" icon="fa-box-open" label="Gudang & Request Part" roles={['teknisi']} />
+              <NavItem id="info_kpi" icon="fa-circle-info" label="Cara Penghitungan KPI" roles={['teknisi']} />
             </div>
             <div className={currentUser.role === 'user' ? 'pt-4 pb-2' : 'hidden'}>
               <NavItem id="req_perbaikan" icon="fa-triangle-exclamation" label="Lapor Kendala Mesin" roles={['user']} />
             </div>
           </nav>
         </div>
-        <div className="absolute bottom-0 w-full p-4 bg-gray-950 shrink-0"><button onClick={handleLogout} className="bg-red-600 text-white w-full p-3 rounded font-bold"><i className="fa-solid fa-power-off mr-2"></i> KELUAR</button></div>
+        <div className="absolute bottom-0 w-full p-4 bg-gray-950 shrink-0"><button onClick={handleLogout} className="bg-red-600 text-white w-full p-3 rounded font-bold hover:bg-red-700 transition-colors"><i className="fa-solid fa-power-off mr-2"></i> KELUAR</button></div>
       </aside>
+      
       <main className="flex-1 flex flex-col bg-gray-50 overflow-hidden relative">
-        <header className="print:hidden bg-white shadow-sm border-b h-16 flex items-center justify-between px-4 md:px-8 z-10 shrink-0 sticky top-0">
+        <header className="print:hidden bg-white shadow-sm border-b h-16 flex items-center justify-between px-4 md:px-6 z-10 shrink-0">
           <div className="flex items-center">
              <button className="md:hidden mr-4 text-gray-600 hover:text-black" onClick={() => setIsSidebarOpen(true)}><i className="fa-solid fa-bars-staggered text-lg"></i></button>
              <h2 className="text-lg font-black uppercase text-gray-800 tracking-widest truncate">{activeMenu.replace('_', ' ')}</h2>
           </div>
 
           <div className="relative">
-             <button onClick={() => setIsNotifOpen(!isNotifOpen)} className="text-gray-600 hover:text-blue-600 relative p-2">
-                <i className="fa-regular fa-bell text-xl"></i>
+             <button onClick={() => setIsNotifOpen(!isNotifOpen)} className="text-gray-600 hover:text-blue-600 transition-colors p-2 relative">
+                <i className="fa-solid fa-bell text-xl"></i>
                 {notifications.length > 0 && (
-                   <span className="absolute top-0 right-0 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow border-2 border-white">
+                   <span className="absolute top-1 right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-white shadow-sm animate-bounce">
                       {notifications.length}
                    </span>
                 )}
              </button>
-             
+
              {isNotifOpen && (
-                <div className="absolute right-0 mt-2 w-72 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 overflow-hidden animate-[fadeIn_0.2s_ease-in-out]">
-                   <div className="bg-gray-900 text-white p-3 text-sm font-bold flex justify-between items-center">
-                     <span>Notifikasi Sistem</span>
-                     <span className="text-[10px] bg-gray-700 px-2 py-0.5 rounded">{notifications.length} Baru</span>
+                <div className="absolute right-0 mt-2 w-72 md:w-80 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 overflow-hidden transform origin-top-right transition-all">
+                   <div className="bg-gray-900 text-white p-3 font-bold flex justify-between items-center">
+                      <span>Notifikasi Sistem</span>
+                      <span className="text-[10px] bg-gray-700 px-2 py-1 rounded-full">{notifications.length} Baru</span>
                    </div>
                    <div className="max-h-80 overflow-y-auto">
                       {notifications.length > 0 ? notifications.map((n, idx) => (
-                         <div key={idx} onClick={() => {setActiveMenu(n.action); setIsNotifOpen(false);}} className="p-3 border-b border-gray-100 hover:bg-blue-50 cursor-pointer flex gap-3 items-start">
-                            <div className={`mt-1 flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white ${n.type==='alert'?'bg-red-500':n.type==='warning'?'bg-orange-500':n.type==='success'?'bg-green-500':'bg-blue-500'}`}>
-                               <i className={`fa-solid ${n.type==='alert'?'fa-triangle-exclamation':n.type==='warning'?'fa-clock':n.type==='success'?'fa-check-double':'fa-info'}`}></i>
+                         <div key={idx} onClick={() => { setActiveMenu(n.action); setIsNotifOpen(false); }} className="p-3 border-b border-gray-100 hover:bg-blue-50 cursor-pointer flex gap-3 items-start transition-colors">
+                            <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white ${n.type==='alert'?'bg-red-500':n.type==='warning'?'bg-orange-500':n.type==='success'?'bg-green-500':'bg-blue-500'}`}>
+                               <i className={`fa-solid ${n.type==='alert'?'fa-triangle-exclamation':n.type==='warning'?'fa-box':n.type==='success'?'fa-check':'fa-info'}`}></i>
                             </div>
                             <div>
                                <p className="text-xs font-bold text-gray-900">{n.title}</p>
-                               <p className="text-xs text-gray-600 leading-snug my-0.5">{n.text}</p>
+                               <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{n.text}</p>
                             </div>
                          </div>
                       )) : (
-                         <p className="text-center text-sm text-gray-500 py-6 italic">Tidak ada notifikasi baru.</p>
+                         <div className="p-6 text-center text-gray-400">
+                            <i className="fa-regular fa-bell-slash text-3xl mb-2"></i>
+                            <p className="text-sm">Tidak ada notifikasi baru.</p>
+                         </div>
                       )}
                    </div>
                 </div>
              )}
           </div>
         </header>
-
+        
         <div className="flex-1 overflow-auto p-4 md:p-8 print:p-0 print:overflow-visible pb-20 md:pb-8 relative">
           {isNotifOpen && <div className="absolute inset-0 z-40 bg-transparent" onClick={() => setIsNotifOpen(false)}></div>}
           
@@ -2120,6 +2237,7 @@ export default function App() {
              {activeMenu === 'kelola_sparepart' && <AdminKelolaSparepart />}
              {activeMenu === 'setup_pm' && <SetupPM />}
              {activeMenu === 'cetak' && <CetakLaporan />}
+             {activeMenu === 'info_kpi' && <InfoKPI />}
              {activeMenu === 'daily_activity' && <TeknisiDailyActivity />}
              {activeMenu === 'cek_harian' && <CekHarian />}
              {activeMenu === 'penanganan_rusak' && <PenangananKerusakan />}
